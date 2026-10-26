@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<title>KevFM Radio Firmware</title>
+<style>
+  :root { color-scheme: dark; --bg: #0b0f14; --card: #131a22; --line: #2a3542; --ink: #eef2f6; --muted: #8b98a7; --accent: #f2a33a; --good: #5fd38d; --bad: #ff7a6b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 460px; margin: 0 auto; padding: 22px 16px calc(28px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 16px; }
+  header { display: flex; align-items: center; gap: 14px; }
+  header img { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; background: #000; }
+  h1 { margin: 0; font-size: 1.25rem; }
+  .sub { margin: 2px 0 0; color: var(--muted); font-size: .9rem; }
+  h2 { margin: 0 0 10px; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+  .card { background: var(--card); border-radius: 16px; padding: 18px 16px; }
+  .btn { padding: 12px 18px; border-radius: 999px; border: 0; background: var(--accent); color: #1a1205; font: inherit; font-weight: 650; cursor: pointer; }
+  .btn.quiet { background: var(--bg); color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
+  .btn:disabled { opacity: .45; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .msg { margin: 12px 0 0; min-height: 1.3em; }
+  .msg.good { color: var(--good); } .msg.bad { color: var(--bad); }
+  .muted { color: var(--muted); font-size: .88rem; margin: 10px 0 0; }
+  .warn { color: var(--accent); font-size: .88rem; margin: 10px 0 0; }
+  .bar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; margin-top: 12px; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+  input[type=file] { width: 100%; color: var(--muted); font: inherit; font-size: .9rem; margin: 4px 0 12px; }
+  input[type=file]::file-selector-button { padding: 9px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; margin-right: 10px; }
+  .hidden { display: none !important; }
+  footer { text-align: center; }
+  footer a { color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="kevfm-cover-256.jpg" alt="">
+    <div>
+      <h1>Radio firmware</h1>
+      <p class="sub">This radio has version <b id="current">…</b></p>
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>Online update</h2>
+    <div class="row">
+      <button class="btn quiet" id="check" type="button">Check for update</button>
+      <button class="btn hidden" id="install" type="button">Install</button>
+    </div>
+    <p class="msg" id="msg"></p>
+    <div class="bar hidden" id="bar"><i id="fill"></i></div>
+    <p class="warn hidden" id="keep">Keep the radio plugged in until it restarts. The music stops during the update.</p>
+    <p class="muted">Looks for a newer version on GitHub (<span id="repo">LordKev007/kevfm-radio</span>). Saved Wi-Fi, volume and light settings stay.</p>
+  </section>
+
+  <section class="card">
+    <h2>Upload a firmware file</h2>
+    <p class="muted" style="margin-top:0">If the radio can't reach GitHub, install a <b>.bin</b> file from this phone or computer instead.</p>
+    <input type="file" id="file" accept=".bin">
+    <button class="btn" id="upload" type="button" disabled>Install this file</button>
+    <p class="msg" id="umsg"></p>
+    <div class="bar hidden" id="ubar"><i id="ufill"></i></div>
+  </section>
+
+  <footer><a href="/">Back to the radio</a></footer>
+</main>
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var polling = null, waitingRestart = false;
+
+  function setMsg(el, text, kind) { el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
+  function busy(on) { $("check").disabled = on; $("install").disabled = on; $("upload").disabled = on || !$("file").files.length; }
+
+  function waitForRestart(el) {
+    if (waitingRestart) return;
+    waitingRestart = true;
+    var started = Date.now();
+    setTimeout(function again() {
+      fetch("/kevfm/update/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) {
+        if (st.state === "done") { setTimeout(again, 2000); return; }   /* not restarted yet */
+        setMsg(el, "Done. This radio now has version " + st.current + ".", "good");
+        $("current").textContent = st.current;
+        $("bar").classList.add("hidden"); $("ubar").classList.add("hidden"); $("keep").classList.add("hidden");
+        $("install").classList.add("hidden"); busy(false); waitingRestart = false;
+      }).catch(function () {
+        if (Date.now() - started < 90000) setTimeout(again, 2000);
+        else { setMsg(el, "The radio hasn't come back yet. Give it a minute, then reload this page.", "bad"); waitingRestart = false; }
+      });
+    }, 4000);
+  }
+
+  function show(st) {
+    $("current").textContent = st.current;
+    $("repo").textContent = st.repo.replace("https://raw.githubusercontent.com/", "").replace(/\/main\/?$/, "");
+    var kind = st.state === "failed" ? "bad" : (st.state === "done" || (st.state === "checked" && st.available)) ? "good" : "";
+    setMsg($("msg"), st.message, kind);
+    $("install").classList.toggle("hidden", !(st.state === "checked" && st.available));
+    var running = st.state === "checking" || st.state === "installing" || st.state === "done";
+    $("bar").classList.toggle("hidden", st.state !== "installing" && st.state !== "done");
+    $("keep").classList.toggle("hidden", st.state !== "installing");
+    $("fill").style.width = st.progress + "%";
+    busy(running);
+    if (st.state === "done") { setMsg($("msg"), st.message + " (about 20 seconds)", "good"); waitForRestart($("msg")); return false; }
+    return running;
+  }
+
+  function poll() {
+    clearTimeout(polling);
+    fetch("/kevfm/update/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) {
+      if (show(st)) polling = setTimeout(poll, 1000);
+    }).catch(function () { polling = setTimeout(poll, 2000); });
+  }
+
+  function post(url) {
+    return fetch(url, { method: "POST" }).then(function (r) { return r.json(); });
+  }
+
+  $("check").addEventListener("click", function () {
+    busy(true); setMsg($("msg"), "Checking GitHub…");
+    post("/kevfm/update/check").then(function (res) {
+      if (!res.ok) { setMsg($("msg"), res.error, "bad"); busy(false); return; }
+      setTimeout(poll, 800);
+    }).catch(function () { setMsg($("msg"), "The radio didn't answer.", "bad"); busy(false); });
+  });
+
+  $("install").addEventListener("click", function () {
+    if (!confirm("Install the new firmware now? The music stops for about a minute. Keep the radio plugged in.")) return;
+    busy(true); setMsg($("msg"), "Starting the update…");
+    post("/kevfm/update/install").then(function (res) {
+      if (!res.ok) { setMsg($("msg"), res.error, "bad"); busy(false); return; }
+      setTimeout(poll, 800);
+    }).catch(function () { setMsg($("msg"), "The radio didn't answer.", "bad"); busy(false); });
+  });
+
+  $("file").addEventListener("change", function () {
+    var f = $("file").files[0];
+    $("upload").disabled = !f;
+    setMsg($("umsg"), f && !/\.bin$/i.test(f.name) ? "That isn't a .bin file." : "", f && !/\.bin$/i.test(f.name) ? "bad" : "");
+  });
+
+  $("upload").addEventListener("click", function () {
+    var f = $("file").files[0];
+    if (!f) return;
+    if (!/\.bin$/i.test(f.name)) { setMsg($("umsg"), "Choose the firmware .bin file.", "bad"); return; }
+    if (!confirm("Install " + f.name + " on this radio? The music stops for about a minute. Keep the radio plugged in.")) return;
+    busy(true);
+    var form = new FormData(); form.append("firmware", f, f.name);
+    var xhr = new XMLHttpRequest();
+    $("ubar").classList.remove("hidden");
+    xhr.upload.onprogress = function (e) {
+      if (e.lengthComputable) { $("ufill").style.width = Math.round(e.loaded / e.total * 100) + "%"; setMsg($("umsg"), "Sending: " + Math.round(e.loaded / e.total * 100) + "%"); }
+    };
+    xhr.onload = function () {
+      var res = {}; try { res = JSON.parse(xhr.responseText); } catch (e) {}
+      if (xhr.status === 200 && res.ok) { $("ufill").style.width = "100%"; setMsg($("umsg"), "Installed. The radio is restarting (about 20 seconds)…", "good"); waitForRestart($("umsg")); }
+      else { setMsg($("umsg"), res.error || "The upload failed.", "bad"); $("ubar").classList.add("hidden"); busy(false); }
+    };
+    xhr.onerror = function () { setMsg($("umsg"), "The upload was interrupted. Nothing was changed; try again.", "bad"); $("ubar").classList.add("hidden"); busy(false); };
+    xhr.open("POST", "/kevfm/update/upload");
+    xhr.send(form);
+  });
+
+  poll();
+})();
+</script>
+</body>
+</html>

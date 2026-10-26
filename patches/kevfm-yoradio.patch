@@ -1,0 +1,2010 @@
+diff -ruN -x build upstream_yoradio/yoRadio/data/www/firmware.html yoRadio/data/www/firmware.html
+--- upstream_yoradio/yoRadio/data/www/firmware.html	1969-12-31 19:00:00.000000000 -0500
++++ yoRadio/data/www/firmware.html	2026-10-25 20:58:40.838026700 -0400
+@@ -0,0 +1,171 @@
++<!doctype html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
++<meta name="theme-color" content="#0b0f14">
++<title>KevFM Radio Firmware</title>
++<style>
++  :root { color-scheme: dark; --bg: #0b0f14; --card: #131a22; --line: #2a3542; --ink: #eef2f6; --muted: #8b98a7; --accent: #f2a33a; --good: #5fd38d; --bad: #ff7a6b; }
++  * { box-sizing: border-box; }
++  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; }
++  main { max-width: 460px; margin: 0 auto; padding: 22px 16px calc(28px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 16px; }
++  header { display: flex; align-items: center; gap: 14px; }
++  header img { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; background: #000; }
++  h1 { margin: 0; font-size: 1.25rem; }
++  .sub { margin: 2px 0 0; color: var(--muted); font-size: .9rem; }
++  h2 { margin: 0 0 10px; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
++  .card { background: var(--card); border-radius: 16px; padding: 18px 16px; }
++  .btn { padding: 12px 18px; border-radius: 999px; border: 0; background: var(--accent); color: #1a1205; font: inherit; font-weight: 650; cursor: pointer; }
++  .btn.quiet { background: var(--bg); color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
++  .btn:disabled { opacity: .45; }
++  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
++  .msg { margin: 12px 0 0; min-height: 1.3em; }
++  .msg.good { color: var(--good); } .msg.bad { color: var(--bad); }
++  .muted { color: var(--muted); font-size: .88rem; margin: 10px 0 0; }
++  .warn { color: var(--accent); font-size: .88rem; margin: 10px 0 0; }
++  .bar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; margin-top: 12px; }
++  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
++  input[type=file] { width: 100%; color: var(--muted); font: inherit; font-size: .9rem; margin: 4px 0 12px; }
++  input[type=file]::file-selector-button { padding: 9px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; margin-right: 10px; }
++  .hidden { display: none !important; }
++  footer { text-align: center; }
++  footer a { color: var(--muted); font-size: .85rem; }
++</style>
++</head>
++<body>
++<main>
++  <header>
++    <img src="kevfm-cover-256.jpg" alt="">
++    <div>
++      <h1>Radio firmware</h1>
++      <p class="sub">This radio has version <b id="current">…</b></p>
++    </div>
++  </header>
++
++  <section class="card">
++    <h2>Online update</h2>
++    <div class="row">
++      <button class="btn quiet" id="check" type="button">Check for update</button>
++      <button class="btn hidden" id="install" type="button">Install</button>
++    </div>
++    <p class="msg" id="msg"></p>
++    <div class="bar hidden" id="bar"><i id="fill"></i></div>
++    <p class="warn hidden" id="keep">Keep the radio plugged in until it restarts. The music stops during the update.</p>
++    <p class="muted">Looks for a newer version on GitHub (<span id="repo">LordKev007/kevfm-radio</span>). Saved Wi-Fi, volume and light settings stay.</p>
++  </section>
++
++  <section class="card">
++    <h2>Upload a firmware file</h2>
++    <p class="muted" style="margin-top:0">If the radio can't reach GitHub, install a <b>.bin</b> file from this phone or computer instead.</p>
++    <input type="file" id="file" accept=".bin">
++    <button class="btn" id="upload" type="button" disabled>Install this file</button>
++    <p class="msg" id="umsg"></p>
++    <div class="bar hidden" id="ubar"><i id="ufill"></i></div>
++  </section>
++
++  <footer><a href="/">Back to the radio</a></footer>
++</main>
++<script>
++(function () {
++  "use strict";
++  var $ = function (id) { return document.getElementById(id); };
++  var polling = null, waitingRestart = false;
++
++  function setMsg(el, text, kind) { el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
++  function busy(on) { $("check").disabled = on; $("install").disabled = on; $("upload").disabled = on || !$("file").files.length; }
++
++  function waitForRestart(el) {
++    if (waitingRestart) return;
++    waitingRestart = true;
++    var started = Date.now();
++    setTimeout(function again() {
++      fetch("/kevfm/update/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) {
++        if (st.state === "done") { setTimeout(again, 2000); return; }   /* not restarted yet */
++        setMsg(el, "Done. This radio now has version " + st.current + ".", "good");
++        $("current").textContent = st.current;
++        $("bar").classList.add("hidden"); $("ubar").classList.add("hidden"); $("keep").classList.add("hidden");
++        $("install").classList.add("hidden"); busy(false); waitingRestart = false;
++      }).catch(function () {
++        if (Date.now() - started < 90000) setTimeout(again, 2000);
++        else { setMsg(el, "The radio hasn't come back yet. Give it a minute, then reload this page.", "bad"); waitingRestart = false; }
++      });
++    }, 4000);
++  }
++
++  function show(st) {
++    $("current").textContent = st.current;
++    $("repo").textContent = st.repo.replace("https://raw.githubusercontent.com/", "").replace(/\/main\/?$/, "");
++    var kind = st.state === "failed" ? "bad" : (st.state === "done" || (st.state === "checked" && st.available)) ? "good" : "";
++    setMsg($("msg"), st.message, kind);
++    $("install").classList.toggle("hidden", !(st.state === "checked" && st.available));
++    var running = st.state === "checking" || st.state === "installing" || st.state === "done";
++    $("bar").classList.toggle("hidden", st.state !== "installing" && st.state !== "done");
++    $("keep").classList.toggle("hidden", st.state !== "installing");
++    $("fill").style.width = st.progress + "%";
++    busy(running);
++    if (st.state === "done") { setMsg($("msg"), st.message + " (about 20 seconds)", "good"); waitForRestart($("msg")); return false; }
++    return running;
++  }
++
++  function poll() {
++    clearTimeout(polling);
++    fetch("/kevfm/update/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) {
++      if (show(st)) polling = setTimeout(poll, 1000);
++    }).catch(function () { polling = setTimeout(poll, 2000); });
++  }
++
++  function post(url) {
++    return fetch(url, { method: "POST" }).then(function (r) { return r.json(); });
++  }
++
++  $("check").addEventListener("click", function () {
++    busy(true); setMsg($("msg"), "Checking GitHub…");
++    post("/kevfm/update/check").then(function (res) {
++      if (!res.ok) { setMsg($("msg"), res.error, "bad"); busy(false); return; }
++      setTimeout(poll, 800);
++    }).catch(function () { setMsg($("msg"), "The radio didn't answer.", "bad"); busy(false); });
++  });
++
++  $("install").addEventListener("click", function () {
++    if (!confirm("Install the new firmware now? The music stops for about a minute. Keep the radio plugged in.")) return;
++    busy(true); setMsg($("msg"), "Starting the update…");
++    post("/kevfm/update/install").then(function (res) {
++      if (!res.ok) { setMsg($("msg"), res.error, "bad"); busy(false); return; }
++      setTimeout(poll, 800);
++    }).catch(function () { setMsg($("msg"), "The radio didn't answer.", "bad"); busy(false); });
++  });
++
++  $("file").addEventListener("change", function () {
++    var f = $("file").files[0];
++    $("upload").disabled = !f;
++    setMsg($("umsg"), f && !/\.bin$/i.test(f.name) ? "That isn't a .bin file." : "", f && !/\.bin$/i.test(f.name) ? "bad" : "");
++  });
++
++  $("upload").addEventListener("click", function () {
++    var f = $("file").files[0];
++    if (!f) return;
++    if (!/\.bin$/i.test(f.name)) { setMsg($("umsg"), "Choose the firmware .bin file.", "bad"); return; }
++    if (!confirm("Install " + f.name + " on this radio? The music stops for about a minute. Keep the radio plugged in.")) return;
++    busy(true);
++    var form = new FormData(); form.append("firmware", f, f.name);
++    var xhr = new XMLHttpRequest();
++    $("ubar").classList.remove("hidden");
++    xhr.upload.onprogress = function (e) {
++      if (e.lengthComputable) { $("ufill").style.width = Math.round(e.loaded / e.total * 100) + "%"; setMsg($("umsg"), "Sending: " + Math.round(e.loaded / e.total * 100) + "%"); }
++    };
++    xhr.onload = function () {
++      var res = {}; try { res = JSON.parse(xhr.responseText); } catch (e) {}
++      if (xhr.status === 200 && res.ok) { $("ufill").style.width = "100%"; setMsg($("umsg"), "Installed. The radio is restarting (about 20 seconds)…", "good"); waitForRestart($("umsg")); }
++      else { setMsg($("umsg"), res.error || "The upload failed.", "bad"); $("ubar").classList.add("hidden"); busy(false); }
++    };
++    xhr.onerror = function () { setMsg($("umsg"), "The upload was interrupted. Nothing was changed; try again.", "bad"); $("ubar").classList.add("hidden"); busy(false); };
++    xhr.open("POST", "/kevfm/update/upload");
++    xhr.send(form);
++  });
++
++  poll();
++})();
++</script>
++</body>
++</html>
+Binary files upstream_yoradio/yoRadio/data/www/kevfm-cover-256.jpg and yoRadio/data/www/kevfm-cover-256.jpg differ
+diff -ruN -x build upstream_yoradio/yoRadio/data/www/kevfm.html yoRadio/data/www/kevfm.html
+--- upstream_yoradio/yoRadio/data/www/kevfm.html	1969-12-31 19:00:00.000000000 -0500
++++ yoRadio/data/www/kevfm.html	2026-10-25 20:58:46.695859100 -0400
+@@ -0,0 +1,162 @@
++<!doctype html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
++<meta name="theme-color" content="#0b0f14">
++<meta name="apple-mobile-web-app-capable" content="yes">
++<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
++<meta name="apple-mobile-web-app-title" content="KevFM Radio">
++<title>The Mighty KevFM</title>
++<style>
++  :root { color-scheme: dark; --bg: #0b0f14; --card: #131a22; --line: #2a3542; --ink: #eef2f6; --muted: #8b98a7; --accent: #f2a33a; }
++  * { box-sizing: border-box; }
++  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); font: 16px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif; }
++  main { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px 16px calc(24px + env(safe-area-inset-bottom)); text-align: center; }
++  #logo { width: min(64vw, 260px); aspect-ratio: 1 / 1; border-radius: 14px; object-fit: cover; background: #000; box-shadow: 0 6px 24px rgba(0, 0, 0, .55); }
++  .card { width: 100%; max-width: 420px; background: var(--card); border-radius: 18px; padding: 24px 20px; }
++  #title { font-size: 1.5rem; font-weight: 650; margin: 0 0 6px; overflow-wrap: anywhere; }
++  #artist { margin: 0; color: var(--muted); font-size: 1.05rem; overflow-wrap: anywhere; }
++  #onair { margin: 14px 0 0; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
++  #onair.live { color: var(--accent); }
++  #onair.live::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 7px; vertical-align: 1px; animation: pulse 2s ease-in-out infinite; }
++  @keyframes pulse { 50% { opacity: .3; } }
++  .vol { display: flex; align-items: center; gap: 12px; margin-top: 22px; }
++  .round { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
++  .round svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
++  .round:active { transform: scale(.94); }
++  input[type=range] { flex: 1; -webkit-appearance: none; appearance: none; height: 8px; border-radius: 4px; background: var(--line); outline: none; }
++  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); border: 0; }
++  input[type=range]::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); border: 0; }
++  #volnum { margin: 8px 0 0; color: var(--muted); font-size: .85rem; font-variant-numeric: tabular-nums; }
++  .group { display: flex; flex-direction: column; align-items: center; gap: 8px; }
++  .label { color: var(--muted); font-size: .85rem; min-height: 1.2em; font-variant-numeric: tabular-nums; }
++  .chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
++  .chip { padding: 9px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: .85rem; white-space: nowrap; cursor: pointer; }
++  .chip.on { background: var(--accent); border-color: var(--accent); color: #1a1205; font-weight: 650; }
++  footer { color: var(--muted); font-size: .8rem; display: flex; flex-direction: column; gap: 6px; }
++  footer a { color: var(--muted); }
++  #offline { color: #ff7a6b; font-size: .9rem; min-height: 1.2em; margin: 0; }
++</style>
++</head>
++<body>
++<main>
++  <img id="logo" src="kevfm-cover-256.jpg" alt="The Mighty KevFM" width="260" height="260">
++  <div class="card">
++    <p id="title">The Mighty KevFM</p>
++    <p id="artist">Live radio</p>
++    <p id="onair">Connecting…</p>
++    <div class="vol">
++      <button class="round" id="down" type="button" aria-label="Quieter"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
++      <input type="range" id="volume" min="0" max="254" step="1" value="0" aria-label="Volume">
++      <button class="round" id="up" type="button" aria-label="Louder"><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>
++    </div>
++    <p id="volnum">Volume</p>
++  </div>
++
++  <div class="group" role="group" aria-label="Sleep timer">
++    <div class="label" id="sleeplabel">Sleep timer</div>
++    <div class="chips" id="sleep">
++      <button type="button" class="chip" data-v="0">Off</button>
++      <button type="button" class="chip" data-v="10">10 min</button>
++      <button type="button" class="chip" data-v="15">15 min</button>
++      <button type="button" class="chip" data-v="30">30 min</button>
++      <button type="button" class="chip" data-v="60">60 min</button>
++    </div>
++  </div>
++
++  <div class="group" role="group" aria-label="Radio light">
++    <div class="label">Light on the radio</div>
++    <div class="chips" id="light">
++      <button type="button" class="chip" data-v="0">When touched</button>
++      <button type="button" class="chip" data-v="1">Always on</button>
++      <button type="button" class="chip" data-v="2">Off</button>
++    </div>
++  </div>
++
++  <p id="offline"></p>
++  <footer>
++    <span id="wifi"></span>
++    <span><a href="/setup">Wi-Fi settings</a> · <a href="/firmware">Firmware</a> · <a href="/settings.html">Advanced</a></span>
++  </footer>
++</main>
++<script>
++(function () {
++  "use strict";
++  var $ = function (id) { return document.getElementById(id); };
++  var STATION = "The Mighty KevFM";
++  var vol = $("volume"), dragging = false, volTimer = null, pending = {}, lastSent = 0;
++  var sleepLeft = 0, sleepAt = 0;
++
++  function post(data) {
++    lastSent = Date.now();
++    return fetch("/kevfm/set", { method: "POST", body: new URLSearchParams(data) }).catch(function () {});
++  }
++  function pct(v) { return Math.round(v / 254 * 100); }
++  function paintVol() {
++    var p = vol.value / 254 * 100;
++    vol.style.background = "linear-gradient(to right, var(--accent) " + p + "%, var(--line) " + p + "%)";
++    $("volnum").textContent = "Volume " + pct(vol.value) + "%";
++  }
++  function sendVol() { clearTimeout(volTimer); volTimer = setTimeout(function () { post({ volume: vol.value }); }, 120); }
++  vol.addEventListener("input", function () { dragging = true; paintVol(); sendVol(); });
++  vol.addEventListener("change", function () { dragging = false; });
++  function step(d) { vol.value = Math.max(0, Math.min(254, +vol.value + d)); paintVol(); sendVol(); }
++  $("down").addEventListener("click", function () { step(-6); });
++  $("up").addEventListener("click", function () { step(6); });
++
++  function mark(groupId, value) {
++    Array.prototype.forEach.call($(groupId).querySelectorAll(".chip"), function (c) { c.classList.toggle("on", +c.dataset.v === value); });
++  }
++  function chips(groupId, key) {
++    $(groupId).addEventListener("click", function (e) {
++      var c = e.target.closest ? e.target.closest(".chip") : null;
++      if (!c) return;
++      var v = +c.dataset.v, d = {}; d[key] = v;
++      mark(groupId, v); pending[key] = Date.now();
++      if (key === "sleep") { sleepLeft = v * 60; sleepAt = Date.now(); showSleep(); }
++      post(d);
++    });
++  }
++  chips("sleep", "sleep"); chips("light", "light");
++
++  function clock(s) { var m = Math.floor(s / 60), r = s % 60; return m + ":" + (r < 10 ? "0" : "") + r; }
++  function showSleep() {
++    var left = sleepLeft - Math.floor((Date.now() - sleepAt) / 1000);
++    $("sleeplabel").textContent = sleepLeft > 0 && left > 0 ? "Radio sleeps in " + clock(left) : "Sleep timer";
++  }
++  setInterval(showSleep, 1000);
++
++  function split(t) {
++    t = String(t || "").trim();
++    var at = t.indexOf(" - ");
++    if (at > 0) return { title: t.slice(at + 3).trim(), artist: t.slice(0, at).trim() };
++    return { title: STATION, artist: "Live radio" };
++  }
++  function fresh(key) { return pending[key] && Date.now() - pending[key] < 3000; }
++
++  function poll() {
++    fetch("/kevfm/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) {
++      $("offline").textContent = "";
++      var connecting = !st.title || st.title.charAt(0) === "[";
++      var s = connecting ? { title: STATION, artist: "Live radio" } : split(st.title);
++      $("title").textContent = s.title;
++      $("artist").textContent = s.artist;
++      document.title = s.title === STATION ? STATION : s.title + " - " + s.artist;
++      var live = st.playing && !connecting;
++      $("onair").textContent = live ? "On air" : "Connecting…";
++      $("onair").classList.toggle("live", live);
++      if (!dragging && Date.now() - lastSent > 2500) { vol.value = st.volume; paintVol(); }
++      if (!fresh("sleep")) { mark("sleep", st.sleep); sleepLeft = st.left; sleepAt = Date.now(); showSleep(); }
++      if (!fresh("light")) mark("light", st.light);
++      $("wifi").textContent = st.ssid ? "Wi-Fi: " + st.ssid + (st.rssi ? " (" + (st.rssi >= -60 ? "strong" : st.rssi >= -72 ? "good" : "weak") + " signal)" : "") : "";
++    }).catch(function () {
++      $("offline").textContent = "Can't reach the radio. Is it on, and is this phone on the same Wi-Fi?";
++    }).then(function () { setTimeout(poll, 2000); });
++  }
++  paintVol();
++  poll();
++})();
++</script>
++</body>
++</html>
+diff -ruN -x build upstream_yoradio/yoRadio/data/www/setup.html yoRadio/data/www/setup.html
+--- upstream_yoradio/yoRadio/data/www/setup.html	1969-12-31 19:00:00.000000000 -0500
++++ yoRadio/data/www/setup.html	2026-10-25 18:01:32.986979000 -0400
+@@ -0,0 +1,213 @@
++<!doctype html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
++<meta name="theme-color" content="#0b0f14">
++<title>KevFM Radio Wi-Fi</title>
++<style>
++  :root { color-scheme: dark; --bg: #0b0f14; --card: #131a22; --line: #2a3542; --ink: #eef2f6; --muted: #8b98a7; --accent: #f2a33a; --bad: #ff7a6b; }
++  * { box-sizing: border-box; }
++  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif; }
++  main { max-width: 460px; margin: 0 auto; padding: 22px 16px calc(28px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 16px; }
++  header { display: flex; align-items: center; gap: 14px; }
++  header img { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; background: #000; }
++  h1 { margin: 0; font-size: 1.25rem; }
++  .sub { margin: 2px 0 0; color: var(--muted); font-size: .9rem; }
++  h2 { margin: 6px 0 0; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); display: flex; justify-content: space-between; align-items: center; }
++  .card { background: var(--card); border-radius: 16px; overflow: hidden; }
++  .net { border-bottom: 1px solid var(--line); }
++  .net:last-child { border-bottom: 0; }
++  .row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 16px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
++  .row .name { flex: 1; overflow-wrap: anywhere; }
++  .tag { font-size: .75rem; color: var(--muted); }
++  .bars { display: flex; align-items: flex-end; gap: 2px; height: 16px; }
++  .bars i { width: 4px; background: var(--line); border-radius: 1px; }
++  .bars i.on { background: var(--ink); }
++  .lock { width: 14px; height: 14px; fill: var(--muted); }
++  .form { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 10px; }
++  label { font-size: .85rem; color: var(--muted); }
++  input[type=text], input[type=password] { width: 100%; padding: 13px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; font-size: 16px; }
++  input:focus { outline: 2px solid var(--accent); border-color: transparent; }
++  .show { display: flex; align-items: center; gap: 8px; font-size: .9rem; color: var(--muted); }
++  .btn { padding: 13px 16px; border-radius: 999px; border: 0; background: var(--accent); color: #1a1205; font: inherit; font-weight: 650; cursor: pointer; }
++  .btn:disabled { opacity: .5; }
++  .link { background: none; border: 0; color: var(--accent); font: inherit; font-size: .9rem; padding: 6px 0; cursor: pointer; }
++  .muted { color: var(--muted); font-size: .9rem; }
++  .err { color: var(--bad); font-size: .9rem; min-height: 1.2em; margin: 0; }
++  .empty { padding: 16px; color: var(--muted); }
++  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s 0.8s linear infinite; vertical-align: -2px; margin-right: 6px; }
++  @keyframes s { to { transform: rotate(360deg); } }
++  .done { text-align: center; padding: 28px 18px; }
++  .done h2 { justify-content: center; font-size: 1rem; margin-bottom: 10px; }
++  .hidden { display: none !important; }
++  .saved .row { cursor: default; }
++  footer { text-align: center; }
++  footer a { color: var(--muted); font-size: .85rem; }
++</style>
++</head>
++<body>
++<main id="main">
++  <header>
++    <img src="kevfm-cover-256.jpg" alt="">
++    <div>
++      <h1>Your KevFM radio</h1>
++      <p class="sub" id="sub">Let's get it on your Wi-Fi.</p>
++    </div>
++  </header>
++
++  <section id="pick">
++    <h2><span>Choose your Wi-Fi</span><button class="link" id="refresh" type="button">Refresh</button></h2>
++    <div class="card" id="list"><div class="empty"><span class="spin"></span>Looking for networks…</div></div>
++    <p><button class="link" id="manualbtn" type="button">My network isn't listed: type its name</button></p>
++    <div class="card hidden" id="manual">
++      <div class="form" style="padding-top:16px">
++        <label for="mssid">Network name</label>
++        <input type="text" id="mssid" maxlength="29" autocapitalize="off" autocorrect="off" spellcheck="false">
++        <label for="mpass">Password</label>
++        <input type="password" id="mpass" maxlength="39" autocapitalize="off" autocorrect="off" spellcheck="false">
++        <label class="show"><input type="checkbox" data-for="mpass"> Show password</label>
++        <p class="err" id="merr"></p>
++        <button class="btn" type="button" id="msave">Connect</button>
++      </div>
++    </div>
++  </section>
++
++  <section id="savedwrap" class="hidden">
++    <h2><span>Saved networks</span></h2>
++    <div class="card saved" id="saved"></div>
++    <p class="muted">The radio tries these in order and remembers up to <span id="max">5</span>.</p>
++  </section>
++
++  <section id="done" class="card done hidden">
++    <h2>Saved</h2>
++    <p id="donetext"></p>
++    <p class="muted">If it can't join, the <b>KevFM-Radio</b> Wi-Fi comes back in about a minute so you can try again.</p>
++  </section>
++
++  <footer id="back" class="hidden"><a href="/">Back to the radio</a></footer>
++</main>
++<script>
++(function () {
++  "use strict";
++  var $ = function (id) { return document.getElementById(id); };
++  var connected = false, open = null, savedNames = [];
++
++  function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
++  function bars(rssi) {
++    var n = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1, h = "";
++    for (var i = 1; i <= 4; i++) h += '<i class="' + (i <= n ? "on" : "") + '" style="height:' + (i * 4) + 'px"></i>';
++    return '<span class="bars" aria-label="signal ' + n + ' of 4">' + h + "</span>";
++  }
++  var LOCK = '<svg class="lock" viewBox="0 0 24 24" aria-label="needs a password"><path d="M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V11a1 1 0 0 1 1-1zm2 0h6V7a3 3 0 0 0-6 0z"/></svg>';
++
++  function post(url, data) {
++    var body = new URLSearchParams(data);
++    return fetch(url, { method: "POST", body: body }).then(function (r) {
++      return r.json().catch(function () { return { ok: r.ok }; });
++    });
++  }
++
++  function check(ssid, pass, needPass) {
++    if (!ssid) return "Enter the network name.";
++    if (ssid.length > 29) return "The radio can only use network names up to 29 characters.";
++    if (needPass && !pass) return "Enter the Wi-Fi password.";
++    if (pass && pass.length < 8) return "Wi-Fi passwords are at least 8 characters.";
++    if (pass.length > 39) return "The radio can only use passwords up to 39 characters.";
++    return "";
++  }
++
++  function save(ssid, pass, errEl, btn) {
++    var problem = check(ssid, pass, false);
++    if (problem) { errEl.textContent = problem; return; }
++    errEl.textContent = ""; btn.disabled = true; btn.textContent = "Saving…";
++    post("/kevfm/wifi", { ssid: ssid, pass: pass }).then(function (res) {
++      if (!res.ok) { errEl.textContent = res.error || "Couldn't save. Try again."; btn.disabled = false; btn.textContent = "Connect"; return; }
++      $("pick").classList.add("hidden"); $("savedwrap").classList.add("hidden"); $("back").classList.add("hidden");
++      $("donetext").innerHTML = "The radio is restarting to join <b>" + esc(ssid) + "</b>. " +
++        (connected ? "Give it about 20 seconds and KevFM starts playing."
++                   : "Put your phone back on <b>" + esc(ssid) + "</b> too. In about 20 seconds KevFM starts playing.");
++      $("done").classList.remove("hidden");
++    }).catch(function () { errEl.textContent = "The radio didn't answer. Are you still on its Wi-Fi?"; btn.disabled = false; btn.textContent = "Connect"; });
++  }
++
++  function toggleShow(e) {
++    var box = e.target; if (box.type !== "checkbox" || !box.dataset.for) return;
++    $(box.dataset.for).type = box.checked ? "text" : "password";
++  }
++  document.addEventListener("change", toggleShow);
++
++  function render(nets) {
++    var list = $("list");
++    if (!nets.length) { list.innerHTML = '<div class="empty">No networks found yet.</div>'; return; }
++    list.innerHTML = "";
++    nets.forEach(function (n, i) {
++      var div = document.createElement("div"); div.className = "net";
++      var isSaved = savedNames.indexOf(n.ssid) >= 0;
++      div.innerHTML = '<button class="row" type="button">' + bars(n.rssi) + '<span class="name">' + esc(n.ssid) +
++        (isSaved ? ' <span class="tag">saved</span>' : "") + "</span>" + (n.open ? '<span class="tag">open</span>' : LOCK) + "</button>" +
++        '<div class="form hidden">' +
++        (n.open ? '<p class="muted">Open network, no password.</p>'
++                : '<label for="p' + i + '">Password for ' + esc(n.ssid) + '</label><input type="password" id="p' + i + '" maxlength="39" autocapitalize="off" autocorrect="off" spellcheck="false">' +
++                  '<label class="show"><input type="checkbox" data-for="p' + i + '"> Show password</label>') +
++        '<p class="err"></p><button class="btn" type="button">Connect</button></div>';
++      var form = div.querySelector(".form"), err = div.querySelector(".err"), btn = div.querySelector(".btn"), pw = div.querySelector("input[type=password]");
++      div.querySelector(".row").addEventListener("click", function () {
++        if (open && open !== form) open.classList.add("hidden");
++        form.classList.toggle("hidden"); open = form;
++        if (pw && !form.classList.contains("hidden")) pw.focus();
++      });
++      btn.addEventListener("click", function () {
++        var pass = pw ? pw.value : "";
++        if (!n.open && !pass) { err.textContent = "Enter the Wi-Fi password."; return; }
++        save(n.ssid, pass, err, btn);
++      });
++      if (pw) pw.addEventListener("keydown", function (e) { if (e.key === "Enter") btn.click(); });
++      list.appendChild(div);
++    });
++  }
++
++  var scanTries = 0;
++  function scan(refresh) {
++    if (refresh) { $("list").innerHTML = '<div class="empty"><span class="spin"></span>Looking for networks…</div>'; scanTries = 0; }
++    fetch("/kevfm/scan" + (refresh ? "?refresh=1" : ""), { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (res) {
++      if (res.networks.length && !refresh) render(res.networks);
++      if (res.scanning && scanTries++ < 15) { setTimeout(function () { scan(false); }, 1500); return; }
++      if (!res.scanning) render(res.networks);
++    }).catch(function () { if (scanTries++ < 15) setTimeout(function () { scan(false); }, 2000); });
++  }
++
++  function loadSaved() {
++    return fetch("/kevfm/networks", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (res) {
++      savedNames = res.saved; $("max").textContent = res.max;
++      var box = $("saved"); box.innerHTML = "";
++      $("savedwrap").classList.toggle("hidden", !res.saved.length);
++      res.saved.forEach(function (name, i) {
++        var div = document.createElement("div"); div.className = "net";
++        div.innerHTML = '<div class="row"><span class="name">' + (i + 1) + ". " + esc(name) + '</span><button class="link" type="button">Forget</button></div>';
++        div.querySelector("button").addEventListener("click", function () {
++          if (!confirm("Forget " + name + "?")) return;
++          post("/kevfm/forget", { ssid: name }).then(loadSaved);
++        });
++        box.appendChild(div);
++      });
++    }).catch(function () {});
++  }
++
++  $("refresh").addEventListener("click", function () { scan(true); });
++  $("manualbtn").addEventListener("click", function () { $("manual").classList.toggle("hidden"); $("mssid").focus(); });
++  $("msave").addEventListener("click", function () { save($("mssid").value.trim(), $("mpass").value, $("merr"), $("msave")); });
++  $("mpass").addEventListener("keydown", function (e) { if (e.key === "Enter") $("msave").click(); });
++
++  fetch("/kevfm/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) {
++    connected = st.mode === "connected";
++    if (connected) {
++      $("sub").textContent = "Connected to " + st.ssid + ". Add another network for when it moves.";
++      $("back").classList.remove("hidden");
++    }
++  }).catch(function () {});
++  loadSaved().then(function () { scan(false); });
++})();
++</script>
++</body>
++</html>
+diff -ruN -x build upstream_yoradio/yoRadio/data/www/theme.css yoRadio/data/www/theme.css
+--- upstream_yoradio/yoRadio/data/www/theme.css	2026-10-25 10:45:04.207844200 -0400
++++ yoRadio/data/www/theme.css	2026-10-25 10:53:01.719046200 -0400
+@@ -15,3 +15,7 @@
+ --section-border:       #555555;
+ --heapbar-color:        #3ea220;
+ }
++
++/* KevFM radio: one station only. Hide the station list, playlist editor and prev/next.
++   (The radio also rewrites its station list to KevFM at every boot.) */
++#toggleplaylist, #prevbutton, #nextbutton, #playlist, #pleditorwrap { display: none !important; }
+diff -ruN -x build upstream_yoradio/yoRadio/myoptions.h yoRadio/myoptions.h
+--- upstream_yoradio/yoRadio/myoptions.h	1969-12-31 19:00:00.000000000 -0500
++++ yoRadio/myoptions.h	2026-10-25 18:38:58.105616900 -0400
+@@ -0,0 +1,53 @@
++#ifndef myoptions_h
++#define myoptions_h
++
++/*******************************************************
++  KevFM gift radio - yoRadio options
++  Board: ELEGOO EL-SM-011 ESP32 (30-pin, classic ESP32, no PSRAM)
++  Pins match E:\KevinFM\dev\gusi_radio_handwired\layout2.py and firmware_spec.md
++********************************************************/
++
++#define L10N_LANGUAGE     EN
++#define DSP_MODEL         DSP_DUMMY      /* headless: no display */
++
++/*  I2S -> MAX98357A  */
++#define I2S_DOUT          27             /* DIN  */
++#define I2S_BCLK          26             /* BCLK */
++#define I2S_LRC           25             /* LRC  */
++
++/*  KY-040 encoder. The module has its own pull-ups on CLK/DT; its GND is D22 (software ground).
++    The push switch (D14) has no pull-up on the module, so the internal pull-up stays on. */
++#define ENC_BTNL          32             /* CLK */
++#define ENC_BTNR          33             /* DT  */
++#define ENC_BTNB          14             /* knob press -> light mode (KevFM plugin) */
++#define ENC_INTERNALPULLUP true
++
++/*  Power / wake button (right MX) to the real GND pin. Long press = sleep, press = wake.  */
++#define BTN_MODE          4
++#define WAKE_PIN          4
++#define BTN_INTERNALPULLUP true
++
++/*  The sleep-timer button (D13), the status LED (D2) and the software grounds
++    (D18, D19, D22) are driven by the KevFM plugin, not by yoRadio.  */
++
++/*  Amp SD (D21) is also owned by the plugin: INPUT = amp on with (L+R)/2 mix, OUTPUT LOW = off.
++    Never drive it HIGH (3.3 V selects left-only). So no MUTE_PIN here.  */
++
++/*  yoRadio's own LED blinking stays off: D2 belongs to the KevFM status light.  */
++#ifdef LED_BUILTIN
++  #undef LED_BUILTIN
++#endif
++#define LED_BUILTIN       255
++
++/*  Mono speaker: mix both channels in software too, so nothing is lost if SD ever ends up
++    in a one-channel mode.  */
++#define PLAYER_FORCE_MONO true
++
++/*  Setup hotspot shown when the radio has no Wi-Fi yet  */
++/*  "KevFM-Radio-4634": the last 4 hex digits of the board's MAC, so two radios in setup
++    mode at once can be told apart (kevfm.cpp builds it)  */
++const char *kevfm_ap_ssid();
++#define apSsid            kevfm_ap_ssid()
++#define apPassword        "kevfmradio"
++
++#endif
+diff -ruN -x build upstream_yoradio/yoRadio/src/core/controls.cpp yoRadio/src/core/controls.cpp
+--- upstream_yoradio/yoRadio/src/core/controls.cpp	2026-10-25 10:45:04.348367400 -0400
++++ yoRadio/src/core/controls.cpp	2026-10-25 10:52:45.583563900 -0400
+@@ -170,8 +170,11 @@
+   if (encoderDelta!=0)
+   {
+     uint8_t encBtnState = digitalRead(first?ENC_BTNB:ENC2_BTNB);
++    if (kevfm_on_turn) kevfm_on_turn(encoderDelta);   /* KevFM patch */
+ #   if defined(DUMMYDISPLAY) && !defined(USE_NEXTION)
+-    first = first?(first && encBtnState):(!encBtnState);
++    /* KevFM patch: one station only, so turning with the knob held is still volume
++       (upstream: next/prev station) */
++    if (!kevfm_on_turn) first = first?(first && encBtnState):(!encBtnState);
+     if(first){
+       int nv = config.store.volume+encoderDelta;
+       if(nv<0) nv=0;
+@@ -360,6 +363,7 @@
+ #endif // if IR_PIN!=255
+ 
+ void onBtnLongPressStart(int id) {
++  if (kevfm_btn_event && kevfm_btn_event(id, KEVFM_BTN_LONG_START)) return;   /* KevFM patch */
+   switch ((controlEvt_e)id) {
+     case EVT_BTNLEFT:
+     case EVT_BTNRIGHT:
+@@ -393,6 +397,7 @@
+ }
+ 
+ void onBtnLongPressStop(int id) {
++  if (kevfm_btn_event && kevfm_btn_event(id, KEVFM_BTN_LONG_STOP)) return;    /* KevFM patch */
+   switch ((controlEvt_e)id) {
+     case EVT_BTNLEFT:
+     case EVT_BTNRIGHT:
+@@ -478,6 +483,7 @@
+ }
+ 
+ void onBtnClick(int id) {
++  if (kevfm_btn_event && kevfm_btn_event(id, KEVFM_BTN_CLICK)) return;        /* KevFM patch */
+   bool passBnCenter = (controlEvt_e)id==EVT_BTNCENTER || (controlEvt_e)id==EVT_ENCBTNB || (controlEvt_e)id==EVT_ENC2BTNB;
+   controlEvt_e btnid = static_cast<controlEvt_e>(id);
+   pm.on_btn_click(btnid);
+@@ -559,6 +565,7 @@
+ }
+ 
+ void onBtnDoubleClick(int id) {
++  if (kevfm_btn_event && kevfm_btn_event(id, KEVFM_BTN_DOUBLE)) return;       /* KevFM patch */
+   if (display.mode() == SCREENSAVER || display.mode() == SCREENBLANK) {
+     display.putRequest(NEWMODE, PLAYER);
+     return;
+diff -ruN -x build upstream_yoradio/yoRadio/src/core/controls.h yoRadio/src/core/controls.h
+--- upstream_yoradio/yoRadio/src/core/controls.h	2026-10-25 10:45:04.348938100 -0400
++++ yoRadio/src/core/controls.h	2026-10-25 10:52:45.582556100 -0400
+@@ -33,4 +33,12 @@
+ 
+ extern __attribute__((weak)) void ctrls_on_loop();
+ 
++/* ==== KevFM patch begin ====
++   Lets the KevFM plugin take a button event (click / double / long press) or see a knob turn
++   before yoRadio acts on it. Return true from kevfm_btn_event = handled, yoRadio does nothing. */
++enum : uint8_t { KEVFM_BTN_CLICK = 0, KEVFM_BTN_DOUBLE = 1, KEVFM_BTN_LONG_START = 2, KEVFM_BTN_LONG_STOP = 3 };
++extern __attribute__((weak)) bool kevfm_btn_event(int id, uint8_t kind);
++extern __attribute__((weak)) void kevfm_on_turn(int8_t delta);
++/* ==== KevFM patch end ==== */
++
+ #endif
+diff -ruN -x build upstream_yoradio/yoRadio/src/core/netserver.cpp yoRadio/src/core/netserver.cpp
+--- upstream_yoradio/yoRadio/src/core/netserver.cpp	2026-10-25 10:45:04.351307500 -0400
++++ yoRadio/src/core/netserver.cpp	2026-10-25 17:50:06.764737800 -0400
+@@ -49,6 +49,7 @@
+ 
+ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);
+ void handleIndex(AsyncWebServerRequest * request);
++extern __attribute__((weak)) void kevfm_web_begin(AsyncWebServer &server);   /* KevFM patch */
+ void handleNotFound(AsyncWebServerRequest * request);
+ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len);
+ 
+@@ -78,6 +79,8 @@
+   nsQueue = xQueueCreate( 20, sizeof( nsRequestParams_t ) );
+   while(nsQueue==NULL){;}
+ 
++  /* ==== KevFM patch: KevFM pages and endpoints go first, so they win over yoRadio's "/" ==== */
++  if (kevfm_web_begin) kevfm_web_begin(webserver);
+   webserver.on("/", HTTP_ANY, handleIndex);
+   webserver.onNotFound(handleNotFound);
+   webserver.onFileUpload(handleUpload);
+diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.cpp yoRadio/src/plugins/KevFM/kevfm.cpp
+--- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.cpp	1969-12-31 19:00:00.000000000 -0500
++++ yoRadio/src/plugins/KevFM/kevfm.cpp	2026-10-25 20:58:07.075027200 -0400
+@@ -0,0 +1,401 @@
++/*
++ * KevFM gift radio plugin for yoRadio. See kevfm.h and README.md.
++ */
++#include "kevfm.h"
++#include "kevfm_station.h"
++#include "kevfm_ota.h"
++#include "kevfm_version.h"
++#include "../../core/options.h"
++#include "../../core/config.h"
++#include "../../core/player.h"
++#include "../../core/network.h"
++#include "../../core/controls.h"
++#include <Preferences.h>
++#include <SPIFFS.h>
++#include "driver/gpio.h"
++#include "driver/rtc_io.h"
++#include "esp_sleep.h"
++#include "esp_mac.h"
++
++KevFM kevfm;
++
++/* ---------------------------------------------------------------- tuning */
++static const uint8_t  kSleepSteps[]       = {0, 10, 15, 30, 60};   /* minutes, 0 = off */
++static const uint32_t KEVFM_COALESCE_MS   = 1000;  /* presses closer than this become one change  */
++static const uint32_t KEVFM_LONGPRESS_MS  = 800;   /* sleep button: hold this long = "time left"  */
++static const uint32_t KEVFM_DEBOUNCE_MS   = 30;
++static const uint32_t KEVFM_TIMER_FADE_MS = 6000;  /* sleep timer reached zero: music fades down  */
++static const uint32_t KEVFM_POWER_FADE_MS = 800;   /* power button held: quick fade               */
++static const uint32_t KEVFM_TOUCH_GLOW_MS = 10000; /* "glow when touched": stays lit this long    */
++static const uint32_t KEVFM_FADE_IN_MS    = 300;
++static const uint32_t KEVFM_FADE_OUT_MS   = 1500;
++static const uint32_t KEVFM_BREATH_MS     = 6000;  /* one breath while the sleep timer runs       */
++static const float    KEVFM_LED_MAX       = 0.60f; /* brightest glow, fraction of full PWM        */
++static const float    KEVFM_BREATH_MIN    = 0.08f;
++static const uint32_t KEVFM_REPLAY_SECS   = 15;    /* stream stopped this long -> play again       */
++static const uint8_t  KEVFM_LED_BITS      = 12;
++static const uint32_t KEVFM_LED_FREQ      = 5000;
++
++static const char* const kClipText[] = {
++  "Sleep timer, ten minutes", "Sleep timer, fifteen minutes", "Sleep timer, thirty minutes",
++  "Sleep timer, sixty minutes", "Sleep timer off", "minutes left",
++  "Light: when touched", "Light on", "Light off"
++};
++
++static inline bool reached(uint32_t now, uint32_t when) { return (int32_t)(now - when) >= 0; }
++
++/* ---------------------------------------------------------------- earliest boot
++   Runs at the end of initArduino(), before setup() and before yoRadio reads any button.
++   The software grounds must be LOW before the encoder / sleep button / LED are used.  */
++extern "C" void initVariant(void) {
++  gpio_deep_sleep_hold_dis();                     /* release the amp-off hold from deep sleep */
++  gpio_hold_dis((gpio_num_t)KEVFM_PIN_AMP_SD);
++  pinMode(KEVFM_PIN_SW_GND_SLEEPBTN, OUTPUT); digitalWrite(KEVFM_PIN_SW_GND_SLEEPBTN, LOW);
++  pinMode(KEVFM_PIN_SW_GND_LED,      OUTPUT); digitalWrite(KEVFM_PIN_SW_GND_LED,      LOW);
++  pinMode(KEVFM_PIN_SW_GND_ENCODER,  OUTPUT); digitalWrite(KEVFM_PIN_SW_GND_ENCODER,  LOW);
++  pinMode(KEVFM_PIN_AMP_SD, INPUT);               /* amp on, (L+R)/2 via the board's divider */
++  pinMode(KEVFM_PIN_LED, OUTPUT); digitalWrite(KEVFM_PIN_LED, LOW);
++  pinMode(KEVFM_PIN_SLEEPBTN, INPUT_PULLUP);
++  rtc_gpio_deinit((gpio_num_t)KEVFM_PIN_POWER);   /* wake pin back to a normal GPIO */
++  /* yoRadio's OneButton objects set these pull-ups in their global constructors, before
++     initArduino() resets the pins, so they are lost. Without them an idle power button reads
++     as held. Set them again here. */
++  pinMode(KEVFM_PIN_POWER, INPUT_PULLUP);
++  pinMode(ENC_BTNB, INPUT_PULLUP);
++  /* Register here, not in the constructor: global constructors run in link order, and if
++     ours runs before pm's, pm's std::vector constructor wipes the registration. All global
++     constructors have finished by the time initVariant() runs. */
++  kevfm.registerNow();
++}
++
++/* ---------------------------------------------------------------- setup hotspot name */
++const char *kevfm_ap_ssid() {
++  static char name[20] = "";
++  if (!name[0]) {
++    uint8_t mac[6] = {0};
++    esp_read_mac(mac, ESP_MAC_WIFI_STA);
++    snprintf(name, sizeof(name), "KevFM-Radio-%02X%02X", mac[4], mac[5]);
++  }
++  return name;
++}
++
++/* ---------------------------------------------------------------- hooks */
++void ctrls_on_loop() { kevfm.loop(); }                                    /* controls.cpp */
++bool kevfm_btn_event(int id, uint8_t kind) { return kevfm.btnEvent(id, kind); } /* KevFM patch */
++void kevfm_on_turn(int8_t delta) { kevfm.onTurn(); }                      /* KevFM patch */
++
++KevFM::KevFM() {}
++
++void KevFM::registerNow() {
++  for (size_t i = 0; i < pm.count(); i++) if (pm.get(i) == this) return;
++  registerPlugin();
++}
++
++void KevFM::on_setup() {
++  Preferences p;
++  if (p.begin("kevfm", true)) {
++    uint8_t m = p.getUChar("light", LIGHT_TOUCHED);
++    _lightMode = m <= LIGHT_OFF ? (kevfmLight_e)m : LIGHT_TOUCHED;
++    p.end();
++  }
++  ledcAttach(KEVFM_PIN_LED, KEVFM_LED_FREQ, KEVFM_LED_BITS);
++  ledcWrite(KEVFM_PIN_LED, 0);
++  Serial.printf("##[KevFM]#\tKevFM radio %s, light mode %d, station %s\n", KEVFM_VERSION, _lightMode, KEVFM_STREAM_URL);
++  _touch();                                       /* glow at power-on, like the original GuSi */
++}
++
++void KevFM::on_connect() { _ensureStation(); }
++
++void KevFM::on_end_setup() {
++  /* KevFM always plays when awake. yoRadio already sent PLAY if smartstart==1. */
++  if (network.status == CONNECTED && config.store.smartstart != 1) {
++    player.sendCommand({PR_PLAY, 1});
++  }
++}
++
++/* The radio has exactly one station. Rewrite the list at every boot if it differs, so the
++   web page's playlist editor can't leave the radio on something else. */
++void KevFM::_ensureStation() {
++  if (config.getMode() != PM_WEB) return;
++  char want[BUFLEN * 2];
++  snprintf(want, sizeof(want), "%s\t%s\t0", KEVFM_STATION_NAME, KEVFM_STREAM_URL);
++  String have;
++  File f = SPIFFS.open(PLAYLIST_PATH, "r");
++  if (f) { have = f.readString(); f.close(); }
++  have.trim();
++  if (have == want) return;
++  f = SPIFFS.open(PLAYLIST_PATH, "w");
++  if (!f) { Serial.println("##[KevFM]#\tcould not write playlist"); return; }
++  f.println(want);
++  f.close();
++  SPIFFS.remove(INDEX_PATH);                       /* yoRadio re-indexes it in initPlaylist() */
++  if (config.store.lastStation != 1) config.saveValue(&config.store.lastStation, (uint16_t)1);
++  Serial.println("##[KevFM]#\tstation list set to KevFM");
++}
++
++/* 1 Hz, main loop (TimeKeeper::loop1) */
++void KevFM::on_ticker() {
++  /* keep playing: if the stream dropped (server restart, network blip), start it again */
++  if (network.status == CONNECTED && !_fading && !kevfmOtaBusy() && player.status() == STOPPED) {
++    if (++_stoppedSecs >= KEVFM_REPLAY_SECS) {
++      _stoppedSecs = 0;
++      Serial.println("##[KevFM]#\tstream stopped, playing again");
++      player.sendCommand({PR_PLAY, 1});
++    }
++  } else {
++    _stoppedSecs = 0;
++  }
++  /* the sleep timer must still put the radio to sleep if yoRadio has paused loopControls
++     (e.g. while the network is lost) */
++  if (_timerRunning() && reached(millis(), _timerEndMs + 2 * KEVFM_TIMER_FADE_MS)) {
++    Serial.println("##[KevFM]#\tsleep timer overdue, sleeping now");
++    _deepSleepNow();
++  }
++}
++
++/* every main-loop pass (ctrls_on_loop) */
++void KevFM::loop() {
++  _webLoop();
++  _sleepBtnLoop();
++  _timerLoop();
++  _fadeLoop();
++  _ledLoop();
++}
++
++/* ---------------------------------------------------------------- touches */
++void KevFM::_touch() {
++  _lastTouchMs = millis();
++}
++
++void KevFM::onTurn() {
++  _lastTurnMs = millis();
++  _touch();
++  if (_fading && _fadeCancelable) _cancelFade();          /* turning the knob cancels a timer fade */
++}
++
++/* Called by the KevFM patch in controls.cpp before yoRadio handles a button.
++   Return true = KevFM handled it, yoRadio does nothing. */
++bool KevFM::btnEvent(int id, uint8_t kind) {
++  _touch();
++  switch ((controlEvt_e)id) {
++    case EVT_ENCBTNB:                               /* knob press: light mode (not play/pause) */
++      if (kind == KEVFM_BTN_CLICK || kind == KEVFM_BTN_DOUBLE) {
++        if (millis() - _lastTurnMs < 700) return true;   /* pressed while turning: ignore */
++        _cycleLight();
++        if (kind == KEVFM_BTN_DOUBLE) _cycleLight();
++      }
++      return true;
++    case EVT_BTNMODE:                               /* power button */
++      if (kind == KEVFM_BTN_LONG_START) {
++        _powerHeld = true;
++        Serial.println("##[KevFM]#\tpower button: going to sleep");
++        _startFadeToSleep(KEVFM_POWER_FADE_MS, false);
++      } else if (kind == KEVFM_BTN_LONG_STOP) {
++        _powerHeld = false;                         /* _fadeLoop sleeps once released + faded */
++      }
++      return true;
++    default:
++      return false;
++  }
++}
++
++/* ---------------------------------------------------------------- sleep timer button */
++void KevFM::_sleepBtnLoop() {
++  uint32_t now = millis();
++  bool raw = digitalRead(KEVFM_PIN_SLEEPBTN) == LOW;
++  if (raw != _sbRaw) { _sbRaw = raw; _sbChangeMs = now; }
++  if (now - _sbChangeMs < KEVFM_DEBOUNCE_MS) return;
++  if (raw && !_sbDown) {                            /* pressed */
++    _sbDown = true; _sbLongDone = false; _sbDownMs = now;
++    _touch();
++  } else if (raw && _sbDown && !_sbLongDone && now - _sbDownMs >= KEVFM_LONGPRESS_MS) {
++    _sbLongDone = true;
++    _sleepBtnLong();
++  } else if (!raw && _sbDown) {                     /* released */
++    _sbDown = false;
++    if (!_sbLongDone) _sleepBtnShort();
++  }
++}
++
++void KevFM::_sleepBtnShort() {
++  uint32_t now = millis();
++  if (_fading && _fadeCancelable) _cancelFade();    /* a press during the timer fade keeps the radio on */
++  _timerIdx = (_timerIdx + 1) % sizeof(kSleepSteps);
++  if (_timerIdx) _timerEndMs = now + (uint32_t)kSleepSteps[_timerIdx] * 60000UL;
++  _coalesceUntil = now + KEVFM_COALESCE_MS;          /* announce only the final setting */
++  _blinkLeft = 0; _blinkOn = false;                  /* stop an older announcement */
++  Serial.printf("##[KevFM]#\tsleep timer -> %u min\n", kSleepSteps[_timerIdx]);
++}
++
++void KevFM::_sleepBtnLong() {
++  _coalesceUntil = 0;
++  if (!_timerRunning()) { _say(CLIP_SLEEP_OFF); return; }
++  uint32_t left = _timerEndMs - millis();
++  if ((int32_t)left < 0) left = 0;
++  _say(CLIP_TIME_LEFT, (uint16_t)((left + 59999UL) / 60000UL));
++}
++
++void KevFM::_timerLoop() {
++  uint32_t now = millis();
++  if (_coalesceUntil && reached(now, _coalesceUntil)) {
++    _coalesceUntil = 0;
++    static const kevfmClip_e clips[] = {CLIP_SLEEP_OFF, CLIP_SLEEP_10, CLIP_SLEEP_15, CLIP_SLEEP_30, CLIP_SLEEP_60};
++    _say(clips[_timerIdx]);
++  }
++  if (_timerRunning() && !_fading && reached(now, _timerEndMs)) {
++    _timerIdx = 0;
++    Serial.println("##[KevFM]#\tsleep timer reached zero");
++    _startFadeToSleep(KEVFM_TIMER_FADE_MS, true);
++  }
++}
++
++/* ---------------------------------------------------------------- fade, amp off, deep sleep */
++void KevFM::_startFadeToSleep(uint32_t fadeMs, bool cancelable) {
++  if (_fading) {                                    /* power button during a timer fade: finish faster */
++    _fadeCancelable = _fadeCancelable && cancelable;
++    if (fadeMs < _fadeMs) _fadeMs = fadeMs;
++    return;
++  }
++  _fading = true;
++  _fadeCancelable = cancelable;
++  _fadeStartMs = millis();
++  _fadeMs = fadeMs;
++  _fadeFromVol = player.getVolume();
++}
++
++void KevFM::_cancelFade() {
++  _fading = false;
++  player.setVolume(_fadeFromVol);
++  Serial.println("##[KevFM]#\tsleep fade cancelled");
++}
++
++void KevFM::_fadeLoop() {
++  if (!_fading) return;
++  uint32_t el = millis() - _fadeStartMs;
++  if (el < _fadeMs) {
++    player.setVolume((uint8_t)((uint32_t)_fadeFromVol * (_fadeMs - el) / _fadeMs));  /* not saved */
++    return;
++  }
++  player.setVolume(0);
++  if (_powerHeld || digitalRead(KEVFM_PIN_POWER) == LOW) return;   /* wait for release, or it wakes at once */
++  _deepSleepNow();
++}
++
++void KevFM::_deepSleepNow() {
++  Serial.println("##[KevFM]#\tamp off, deep sleep (power button wakes)");
++  player.setVolume(0);
++  ledcWrite(KEVFM_PIN_LED, 0);
++  /* amp SD LOW = shutdown, no hiss. GPIO21 is not an RTC pin, so hold it as a digital pad. */
++  pinMode(KEVFM_PIN_AMP_SD, OUTPUT);
++  digitalWrite(KEVFM_PIN_AMP_SD, LOW);
++  gpio_hold_en((gpio_num_t)KEVFM_PIN_AMP_SD);
++  gpio_deep_sleep_hold_en();
++  /* wake on the power button (to real GND); keep its pull-up alive while asleep */
++  esp_sleep_enable_ext0_wakeup((gpio_num_t)KEVFM_PIN_POWER, 0);
++  rtc_gpio_pullup_en((gpio_num_t)KEVFM_PIN_POWER);
++  rtc_gpio_pulldown_dis((gpio_num_t)KEVFM_PIN_POWER);
++  Serial.flush();
++  esp_deep_sleep_start();
++}
++
++/* ---------------------------------------------------------------- status light */
++void KevFM::_cycleLight() {
++  _setLight((kevfmLight_e)((_lightMode + 1) % 3));
++}
++
++void KevFM::_setLight(kevfmLight_e mode) {
++  _lightMode = mode;
++  Preferences p;
++  if (p.begin("kevfm", false)) { p.putUChar("light", _lightMode); p.end(); }
++  static const kevfmClip_e clips[] = {CLIP_LIGHT_TOUCHED, CLIP_LIGHT_ON, CLIP_LIGHT_OFF};
++  _say(clips[_lightMode]);
++}
++
++/* ---------------------------------------------------------------- web page requests */
++uint8_t KevFM::kSleepMinutes(uint8_t idx) { return idx < sizeof(kSleepSteps) ? kSleepSteps[idx] : 0; }
++
++uint32_t KevFM::sleepSecondsLeft() const {
++  if (!_timerIdx) return 0;
++  int32_t left = (int32_t)(_timerEndMs - millis());
++  return left > 0 ? (uint32_t)(left + 999) / 1000 : 0;
++}
++
++void KevFM::_setSleep(uint8_t minutes) {
++  for (uint8_t i = 0; i < sizeof(kSleepSteps); i++) {
++    if (kSleepSteps[i] != minutes) continue;
++    if (_fading && _fadeCancelable) _cancelFade();
++    _timerIdx = i;
++    if (i) _timerEndMs = millis() + (uint32_t)minutes * 60000UL;
++    _coalesceUntil = 0;
++    static const kevfmClip_e clips[] = {CLIP_SLEEP_OFF, CLIP_SLEEP_10, CLIP_SLEEP_15, CLIP_SLEEP_30, CLIP_SLEEP_60};
++    _say(clips[i]);                                  /* the radio confirms, as for the button */
++    Serial.printf("##[KevFM]#\tsleep timer -> %u min (web)\n", minutes);
++    return;
++  }
++}
++
++void KevFM::_webLoop() {
++  int8_t v = webSleep;
++  if (v >= 0) { webSleep = -1; _setSleep((uint8_t)v); _touch(); }
++  v = webLight;
++  if (v >= 0 && v <= LIGHT_OFF) { webLight = -1; _setLight((kevfmLight_e)v); _touch(); }
++  if (restartAt && reached(millis(), restartAt)) {
++    Serial.println("##[KevFM]#\tWi-Fi saved, restarting");
++    config.saveValue(&config.store.lastSSID, (uint8_t)1);   /* try the network just added first */
++    delay(100);
++    ESP.restart();
++  }
++  kevfmWebLoop();
++  kevfmOtaLoop();
++}
++
++/* Spoken clips are a later phase (voice not chosen). Until then the light answers instead:
++   1-4 short blinks = 10/15/30/60 min, one long blink = off; light mode: 1 blink = when touched,
++   2 = always on, long = off; time left: one blink per started 10 minutes. */
++void KevFM::_say(kevfmClip_e clip, uint16_t minutes) {
++  if (clip == CLIP_TIME_LEFT) Serial.printf("##[KevFM]#\tsay: %u %s\n", minutes, kClipText[clip]);
++  else Serial.printf("##[KevFM]#\tsay: %s\n", kClipText[clip]);
++  uint8_t n = 1; bool lng = false;
++  switch (clip) {
++    case CLIP_SLEEP_10: n = 1; break;
++    case CLIP_SLEEP_15: n = 2; break;
++    case CLIP_SLEEP_30: n = 3; break;
++    case CLIP_SLEEP_60: n = 4; break;
++    case CLIP_TIME_LEFT: n = (minutes + 9) / 10; if (n < 1) n = 1; break;
++    case CLIP_LIGHT_TOUCHED: n = 1; break;
++    case CLIP_LIGHT_ON: n = 2; break;
++    case CLIP_SLEEP_OFF:
++    case CLIP_LIGHT_OFF: n = 1; lng = true; break;
++  }
++  _blinkLeft = n; _blinkLong = lng; _blinkOn = false;
++  _blinkNextMs = millis() + 300;                    /* short dark gap so the blinks stand out */
++}
++
++void KevFM::_ledLoop() {
++  uint32_t now = millis();
++  uint32_t dt = now - _lastLedMs;
++  if (dt < 5) return;
++  _lastLedMs = now;
++  float target;
++  bool blinking = _blinkLeft > 0 || _blinkOn;
++  if (blinking) {
++    if (reached(now, _blinkNextMs)) {
++      if (_blinkOn) { _blinkOn = false; _blinkLeft--; _blinkNextMs = now + 300; }
++      else if (_blinkLeft) { _blinkOn = true; _blinkNextMs = now + (_blinkLong ? 1000 : 250); }
++    }
++    _level = _blinkOn ? 1.0f : 0.0f;
++    if (!_blinkLeft && !_blinkOn) _lastTouchMs = now;  /* settle back from a fresh "touch" */
++  } else {
++    if (_lightMode == LIGHT_OFF) target = 0;
++    else if (_timerRunning()) {
++      float ph = (float)(now % KEVFM_BREATH_MS) / KEVFM_BREATH_MS;
++      target = KEVFM_BREATH_MIN + (1.0f - KEVFM_BREATH_MIN) * (0.5f - 0.5f * cosf(2 * PI * ph));
++    }
++    else if (_lightMode == LIGHT_ALWAYS) target = 1;
++    else target = (now - _lastTouchMs < KEVFM_TOUCH_GLOW_MS) ? 1 : 0;
++    if (target > _level) { _level += (float)dt / KEVFM_FADE_IN_MS;  if (_level > target) _level = target; }
++    else                 { _level -= (float)dt / KEVFM_FADE_OUT_MS; if (_level < target) _level = target; }
++  }
++  float g = _level * _level * KEVFM_LED_MAX;          /* rough gamma so fades look even */
++  ledcWrite(KEVFM_PIN_LED, (uint32_t)(g * ((1 << KEVFM_LED_BITS) - 1)));
++}
+diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.h yoRadio/src/plugins/KevFM/kevfm.h
+--- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.h	1969-12-31 19:00:00.000000000 -0500
++++ yoRadio/src/plugins/KevFM/kevfm.h	2026-10-25 17:50:55.405758000 -0400
+@@ -0,0 +1,111 @@
++/*
++ * KevFM gift radio plugin for yoRadio.
++ *
++ * Owns: software grounds (D18/D19/D22), amp SD (D21), sleep-timer button (D13),
++ * status light (D2), knob press (light mode), power-button sleep, KevFM-only station,
++ * always-play. See E:\KevinFM\dev\gusi_radio_handwired\firmware_spec.md
++ *
++ * Needs the small "KevFM patch" in src/core/controls.cpp (kevfm_btn_event / kevfm_on_turn hooks).
++ */
++#ifndef KEVFM_H
++#define KEVFM_H
++
++#include "../../pluginsManager/pluginsManager.h"
++
++/*  Pins  */
++#define KEVFM_PIN_SW_GND_SLEEPBTN  18   /* sleep button's ground  */
++#define KEVFM_PIN_SW_GND_LED       19   /* LED cathode            */
++#define KEVFM_PIN_SW_GND_ENCODER   22   /* KY-040 GND             */
++#define KEVFM_PIN_AMP_SD           21   /* INPUT = on, OUTPUT LOW = off, never HIGH */
++#define KEVFM_PIN_SLEEPBTN         13   /* to D18, internal pull-up */
++#define KEVFM_PIN_LED               2   /* -> 220R -> LED -> D19   */
++#define KEVFM_PIN_POWER             4   /* power/wake, real GND (yoRadio BTN_MODE / WAKE_PIN) */
++
++/*  Things a listener should hear. Until the clips exist (voice not chosen yet) each one is
++    shown as a blink pattern on the status light instead.  */
++enum kevfmClip_e : uint8_t {
++  CLIP_SLEEP_10, CLIP_SLEEP_15, CLIP_SLEEP_30, CLIP_SLEEP_60, CLIP_SLEEP_OFF,
++  CLIP_TIME_LEFT,                   /* "Twenty-two minutes left" (minutes passed separately) */
++  CLIP_LIGHT_TOUCHED, CLIP_LIGHT_ON, CLIP_LIGHT_OFF
++};
++
++enum kevfmLight_e : uint8_t { LIGHT_TOUCHED = 0, LIGHT_ALWAYS = 1, LIGHT_OFF = 2 };
++
++class KevFM : public Plugin {
++public:
++  KevFM();
++  void registerNow();               /* called from initVariant(), see kevfm.cpp */
++  void on_setup();
++  void on_connect();
++  void on_end_setup();
++  void on_ticker();
++
++  /*  Called from the main loop (ctrls_on_loop) and from the controls.cpp patch  */
++  void loop();
++  bool btnEvent(int id, uint8_t kind);
++  void onTurn();
++
++  /*  Web page (kevfm_web.cpp). Requests arrive on the web server's task, so they only leave
++      a request here; loop() carries it out on the main loop.  */
++  volatile int8_t   webSleep = -1;     /* minutes 0/10/15/30/60, -1 = none */
++  volatile int8_t   webLight = -1;     /* kevfmLight_e, -1 = none */
++  volatile uint32_t restartAt = 0;     /* millis() to restart at (after saving Wi-Fi), 0 = none */
++  uint8_t  lightMode() const { return _lightMode; }
++  uint8_t  sleepSetting() const { return kSleepMinutes(_timerIdx); }
++  uint32_t sleepSecondsLeft() const;
++  static uint8_t kSleepMinutes(uint8_t idx);
++
++private:
++  /* sleep timer */
++  uint8_t  _timerIdx = 0;            /* index into kSleepSteps, 0 = off */
++  uint32_t _timerEndMs = 0;
++  uint32_t _coalesceUntil = 0;       /* announce the setting when this passes */
++  bool     _sbDown = false, _sbLongDone = false;
++  uint32_t _sbChangeMs = 0, _sbDownMs = 0;
++  bool     _sbRaw = false;
++  /* light */
++  kevfmLight_e _lightMode = LIGHT_TOUCHED;
++  uint32_t _lastTouchMs = 0;
++  float    _level = 0;               /* 0..1 current brightness */
++  uint32_t _lastLedMs = 0;
++  /* blink announcement (stand-in for spoken clips) */
++  uint8_t  _blinkLeft = 0;
++  bool     _blinkLong = false;
++  uint32_t _blinkNextMs = 0;
++  bool     _blinkOn = false;
++  /* knob */
++  uint32_t _lastTurnMs = 0;
++  /* sleep / fade */
++  bool     _fading = false;
++  bool     _fadeCancelable = false;   /* timer fade: any touch keeps the radio on */
++  uint32_t _fadeStartMs = 0, _fadeMs = 0;
++  uint8_t  _fadeFromVol = 0;
++  bool     _powerHeld = false;
++  /* keep playing */
++  uint16_t _stoppedSecs = 0;
++
++  void _touch();
++  void _sleepBtnLoop();
++  void _sleepBtnShort();
++  void _sleepBtnLong();
++  void _timerLoop();
++  void _ledLoop();
++  void _say(kevfmClip_e clip, uint16_t minutes = 0);
++  void _cycleLight();
++  void _startFadeToSleep(uint32_t fadeMs, bool cancelable);
++  void _cancelFade();
++  void _fadeLoop();
++  void _deepSleepNow();
++  void _ensureStation();
++  void _setSleep(uint8_t minutes);
++  void _setLight(kevfmLight_e mode);
++  void _webLoop();
++  bool _timerRunning() { return _timerIdx != 0; }
++};
++
++extern KevFM kevfm;
++
++/* kevfm_web.cpp */
++void kevfmWebLoop();     /* captive DNS + first Wi-Fi scan while in hotspot mode */
++
++#endif
+diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.cpp yoRadio/src/plugins/KevFM/kevfm_ota.cpp
+--- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.cpp	1969-12-31 19:00:00.000000000 -0500
++++ yoRadio/src/plugins/KevFM/kevfm_ota.cpp	2026-10-25 20:57:33.958054200 -0400
+@@ -0,0 +1,408 @@
++/*
++ * KevFM radio firmware updates, the same way as the Bubs stock ticker: nothing happens
++ * unless someone presses a button on the radio's Firmware page.
++ *
++ *   POST /kevfm/update/check     read update.json from GitHub (raw file), compare versions
++ *   POST /kevfm/update/install   download the newer .bin (+ any web files listed), restart
++ *   POST /kevfm/update/upload    install a .bin file sent from the browser (no GitHub needed)
++ *   GET  /kevfm/update/status    state, message, versions, progress
++ *
++ * update.json:  {"version": "0.2.1", "file": "kevfm-radio.bin", "size": 1484051,
++ *                "web": ["kevfm.html", "setup.html", "firmware.html"]}
++ *   "file" is a plain file name in the repo root; "size" and "web" are optional. Web files
++ *   come from the repo's yoRadio/data/www/ and replace the radio's copies (saved Wi-Fi is
++ *   never touched).
++ *
++ * Check and install run on the main loop (the web request only queues them and returns),
++ * with the stream stopped while installing: this board has no PSRAM, and https needs the
++ * memory the stream buffer uses.
++ */
++#include "kevfm.h"
++#include "kevfm_ota.h"
++#include "kevfm_version.h"
++#include "../../core/options.h"
++#include "../../core/config.h"
++#include "../../core/player.h"
++#include "../../core/network.h"
++#include <WiFi.h>
++#include <WiFiClientSecure.h>
++#include <HTTPClient.h>
++#include <Update.h>
++#include <SPIFFS.h>
++
++enum otaState_e : uint8_t { OTA_IDLE, OTA_CHECKING, OTA_CHECKED, OTA_INSTALLING, OTA_DONE, OTA_FAILED };
++static const char *const kStateName[] = {"idle", "checking", "checked", "installing", "done", "failed"};
++
++static portMUX_TYPE otaMux = portMUX_INITIALIZER_UNLOCKED;
++static volatile otaState_e otaState = OTA_IDLE;
++static volatile bool checkQueued = false, installQueued = false, uploadActive = false;
++static volatile uint8_t otaProgress = 0;
++static volatile uint32_t otaRestartAt = 0;
++static char otaMessage[160] = "";
++static char latestVersion[24] = "";
++static char latestFile[64] = "";
++static uint32_t latestSize = 0;
++static bool updateAvailable = false;
++static const uint8_t KEVFM_MAX_WEB = 8;
++static String webFiles[KEVFM_MAX_WEB];
++static uint8_t webCount = 0;
++static bool uploadOk = false;
++static char uploadError[96] = "";
++
++static void setMsg(otaState_e st, const char *fmt, ...) {
++  char buf[sizeof(otaMessage)];
++  va_list ap; va_start(ap, fmt); vsnprintf(buf, sizeof(buf), fmt, ap); va_end(ap);
++  portENTER_CRITICAL(&otaMux);
++  otaState = st;
++  strlcpy(otaMessage, buf, sizeof(otaMessage));
++  portEXIT_CRITICAL(&otaMux);
++  Serial.printf("##[KevFM]#\tupdate: %s\n", buf);
++}
++
++bool kevfmOtaBusy() {
++  return otaState == OTA_CHECKING || otaState == OTA_INSTALLING || checkQueued || installQueued || uploadActive || otaRestartAt;
++}
++
++/* ---------------------------------------------------------------- tiny JSON readers */
++static bool jsonString(const String &js, const char *key, String &out) {
++  String k = String("\"") + key + "\"";
++  int i = js.indexOf(k); if (i < 0) return false;
++  i = js.indexOf(':', i + k.length()); if (i < 0) return false;
++  i = js.indexOf('"', i); if (i < 0) return false;
++  int j = js.indexOf('"', i + 1); if (j < 0) return false;
++  out = js.substring(i + 1, j);
++  return true;
++}
++
++static bool jsonUInt(const String &js, const char *key, uint32_t &out) {
++  String k = String("\"") + key + "\"";
++  int i = js.indexOf(k); if (i < 0) return false;
++  i = js.indexOf(':', i + k.length()); if (i < 0) return false;
++  i++;
++  while (i < (int)js.length() && js[i] == ' ') i++;
++  if (i >= (int)js.length() || !isDigit(js[i])) return false;
++  out = (uint32_t)js.substring(i).toInt();
++  return true;
++}
++
++static uint8_t jsonStringArray(const String &js, const char *key, String out[], uint8_t max) {
++  String k = String("\"") + key + "\"";
++  int i = js.indexOf(k); if (i < 0) return 0;
++  i = js.indexOf('[', i + k.length()); if (i < 0) return 0;
++  int end = js.indexOf(']', i); if (end < 0) return 0;
++  uint8_t n = 0;
++  while (n < max) {
++    int a = js.indexOf('"', i); if (a < 0 || a > end) break;
++    int b = js.indexOf('"', a + 1); if (b < 0 || b > end) break;
++    out[n++] = js.substring(a + 1, b);
++    i = b + 1;
++  }
++  return n;
++}
++
++static bool plainName(const String &s) {
++  return s.length() > 0 && s.length() < 48 && s.indexOf("..") < 0 && s.indexOf('/') < 0 &&
++         s.indexOf('\\') < 0 && s.indexOf(':') < 0;
++}
++
++/* "0.2.10" > "0.2.9"; a leading v and anything after '-' are ignored */
++static int compareVersions(String a, String b) {
++  for (String *s : {&a, &b}) {
++    s->trim();
++    if (s->startsWith("v") || s->startsWith("V")) s->remove(0, 1);
++    int d = s->indexOf('-'); if (d >= 0) *s = s->substring(0, d);
++  }
++  int pa = 0, pb = 0;
++  for (int part = 0; part < 3; part++) {
++    int ea = a.indexOf('.', pa), eb = b.indexOf('.', pb);
++    long va = a.substring(pa, ea < 0 ? a.length() : ea).toInt();
++    long vb = b.substring(pb, eb < 0 ? b.length() : eb).toInt();
++    if (va != vb) return va < vb ? -1 : 1;
++    pa = ea < 0 ? a.length() : ea + 1;
++    pb = eb < 0 ? b.length() : eb + 1;
++  }
++  return 0;
++}
++
++/* ---------------------------------------------------------------- stream pause */
++static bool stopStream() {
++  bool was = player.status() == PLAYING;
++  if (was) {
++    player.sendCommand({PR_STOP, 0});
++    player.loop();                                  /* we are on the main loop: run it now */
++    delay(300);
++  }
++  return was;
++}
++
++/* ---------------------------------------------------------------- check */
++static void doCheck() {
++  setMsg(OTA_CHECKING, "Checking GitHub for new firmware...");
++  if (WiFi.status() != WL_CONNECTED) { setMsg(OTA_FAILED, "The radio is not connected to the Internet."); return; }
++  uint32_t big = ESP.getMaxAllocHeap();
++  bool paused = false;
++  if (big < 45000) paused = stopStream();           /* not enough room for https while streaming */
++  Serial.printf("##[KevFM]#\tupdate check: largest free block %u bytes%s\n", big, paused ? ", stream paused" : "");
++
++  WiFiClientSecure client;
++  client.setInsecure();                             /* as the ticker: plain raw.githubusercontent.com */
++  HTTPClient http;
++  http.setReuse(false);
++  http.setTimeout(12000);
++  String payload;
++  int code = -1;
++  if (http.begin(client, KEVFM_UPDATE_MANIFEST)) {
++    code = http.GET();
++    if (code == HTTP_CODE_OK) payload = http.getString();
++    http.end();
++  }
++  client.stop();
++  if (paused) player.sendCommand({PR_PLAY, 1});
++
++  if (code != HTTP_CODE_OK) {
++    if (code < 0) setMsg(OTA_FAILED, "Couldn't reach GitHub (%s). You can still upload a .bin file below.", HTTPClient::errorToString(code).c_str());
++    else setMsg(OTA_FAILED, "GitHub answered HTTP %d for update.json. You can still upload a .bin file below.", code);
++    return;
++  }
++  String ver, file;
++  uint32_t size = 0;
++  if (!jsonString(payload, "version", ver) || !ver.length()) { setMsg(OTA_FAILED, "update.json has no version."); return; }
++  if (!jsonString(payload, "file", file)) file = "kevfm-radio.bin";
++  file.trim();
++  if (!plainName(file) || !file.endsWith(".bin")) { setMsg(OTA_FAILED, "update.json has an invalid file name."); return; }
++  jsonUInt(payload, "size", size);
++  String web[KEVFM_MAX_WEB];
++  uint8_t nweb = jsonStringArray(payload, "web", web, KEVFM_MAX_WEB);
++  for (uint8_t i = 0; i < nweb; i++) if (!plainName(web[i])) { setMsg(OTA_FAILED, "update.json has an invalid web file name."); return; }
++
++  int cmp = compareVersions(ver, KEVFM_VERSION);
++  portENTER_CRITICAL(&otaMux);
++  strlcpy(latestVersion, ver.c_str(), sizeof(latestVersion));
++  strlcpy(latestFile, file.c_str(), sizeof(latestFile));
++  latestSize = size;
++  updateAvailable = cmp > 0;
++  portEXIT_CRITICAL(&otaMux);
++  webCount = nweb;
++  for (uint8_t i = 0; i < nweb; i++) webFiles[i] = web[i];
++  if (cmp > 0) setMsg(OTA_CHECKED, "Version %s is available (this radio has %s).", ver.c_str(), KEVFM_VERSION);
++  else if (cmp == 0) setMsg(OTA_CHECKED, "This radio already has the latest firmware (%s).", KEVFM_VERSION);
++  else setMsg(OTA_CHECKED, "This radio (%s) is newer than the published firmware (%s).", KEVFM_VERSION, ver.c_str());
++}
++
++/* ---------------------------------------------------------------- install */
++static bool download(const String &url, const char *what, uint32_t expect, bool toFlash, const char *spiffsPath) {
++  WiFiClientSecure client;
++  client.setInsecure();
++  client.setTimeout(15000);
++  HTTPClient http;
++  http.setReuse(false);
++  http.setTimeout(15000);
++  if (!http.begin(client, url)) { setMsg(OTA_FAILED, "Couldn't open the %s download.", what); return false; }
++  int code = http.GET();
++  if (code != HTTP_CODE_OK) {
++    if (code < 0) setMsg(OTA_FAILED, "%s download failed: %s.", what, HTTPClient::errorToString(code).c_str());
++    else setMsg(OTA_FAILED, "GitHub answered HTTP %d for the %s.", code, what);
++    http.end(); client.stop(); return false;
++  }
++  int len = http.getSize();
++  uint32_t room = ESP.getFreeSketchSpace() & 0xFFFFF000;
++  File f;
++  if (toFlash) {
++    if ((len > 0 && (uint32_t)len > room) || (expect && expect > room)) { setMsg(OTA_FAILED, "The new firmware is too big for this radio."); http.end(); client.stop(); return false; }
++    if (!Update.begin(len > 0 ? (uint32_t)len : room, U_FLASH)) { setMsg(OTA_FAILED, "Couldn't start writing the firmware (error %u).", Update.getError()); http.end(); client.stop(); return false; }
++  } else {
++    f = SPIFFS.open(spiffsPath, "w");
++    if (!f) { setMsg(OTA_FAILED, "Couldn't save %s.", what); http.end(); client.stop(); return false; }
++  }
++  WiFiClient *stream = http.getStreamPtr();
++  uint8_t buf[1024];
++  size_t written = 0;
++  uint32_t lastData = millis();
++  bool failed = false;
++  int lastPct = -1;
++  while ((http.connected() || stream->available()) && (len < 0 || written < (size_t)len)) {
++    size_t avail = stream->available();
++    if (!avail) {
++      if (millis() - lastData > 15000) { setMsg(OTA_FAILED, "The %s download timed out.", what); failed = true; break; }
++      delay(1);
++      continue;
++    }
++    int n = stream->readBytes((char *)buf, avail > sizeof(buf) ? sizeof(buf) : avail);
++    if (n <= 0) { setMsg(OTA_FAILED, "The %s download stopped.", what); failed = true; break; }
++    size_t w = toFlash ? Update.write(buf, n) : f.write(buf, n);
++    if (w != (size_t)n) { setMsg(OTA_FAILED, "Writing the %s failed%s.", what, toFlash ? "" : " (radio storage full?)"); failed = true; break; }
++    written += w;
++    lastData = millis();
++    if (toFlash && len > 0) {
++      int pct = (int)(written * 100ULL / (size_t)len);
++      otaProgress = pct > 99 ? 99 : pct;
++      if (pct / 10 != lastPct) { lastPct = pct / 10; setMsg(OTA_INSTALLING, "Downloading firmware: %d%%", pct); }
++    }
++  }
++  http.end();
++  client.stop();
++  if (!failed && len > 0 && written != (size_t)len) { setMsg(OTA_FAILED, "The %s download ended early.", what); failed = true; }
++  if (toFlash) {
++    if (failed) { Update.abort(); return false; }
++    if (!Update.end(true)) { setMsg(OTA_FAILED, "The new firmware didn't check out (error %u). Nothing was changed.", Update.getError()); return false; }
++  } else {
++    f.close();
++    if (failed) { SPIFFS.remove(spiffsPath); return false; }
++  }
++  return true;
++}
++
++static void doInstall() {
++  char file[sizeof(latestFile)], ver[sizeof(latestVersion)];
++  uint32_t size;
++  bool avail;
++  portENTER_CRITICAL(&otaMux);
++  strlcpy(file, latestFile, sizeof(file)); strlcpy(ver, latestVersion, sizeof(ver));
++  size = latestSize; avail = updateAvailable;
++  portEXIT_CRITICAL(&otaMux);
++  if (!avail) { setMsg(OTA_FAILED, "Check for an update first."); return; }
++  if (WiFi.status() != WL_CONNECTED) { setMsg(OTA_FAILED, "The radio is not connected to the Internet."); return; }
++  otaProgress = 0;
++  setMsg(OTA_INSTALLING, "Stopping the music for the update...");
++  stopStream();
++  Serial.printf("##[KevFM]#\tupdate install: largest free block %u bytes\n", ESP.getMaxAllocHeap());
++
++  /* web files first, to temporary names; they replace the old ones only if the firmware
++     installs too, so pages and firmware stay matched */
++  for (uint8_t i = 0; i < webCount; i++) {
++    setMsg(OTA_INSTALLING, "Downloading web page %s...", webFiles[i].c_str());
++    String tmp = "/www/" + webFiles[i] + ".new";
++    if (!download(String(KEVFM_UPDATE_BASE) + KEVFM_UPDATE_WEBDIR + webFiles[i], webFiles[i].c_str(), 0, false, tmp.c_str())) {
++      for (uint8_t j = 0; j <= i; j++) SPIFFS.remove("/www/" + webFiles[j] + ".new");
++      player.sendCommand({PR_PLAY, 1});
++      return;
++    }
++  }
++  setMsg(OTA_INSTALLING, "Downloading firmware %s...", ver);
++  if (!download(String(KEVFM_UPDATE_BASE) + file, "firmware", size, true, nullptr)) {
++    for (uint8_t j = 0; j < webCount; j++) SPIFFS.remove("/www/" + webFiles[j] + ".new");
++    player.sendCommand({PR_PLAY, 1});
++    return;
++  }
++  for (uint8_t i = 0; i < webCount; i++) {
++    String fin = "/www/" + webFiles[i];
++    SPIFFS.remove(fin);
++    SPIFFS.rename(fin + ".new", fin);
++  }
++  otaProgress = 100;
++  setMsg(OTA_DONE, "Version %s installed. The radio is restarting...", ver);
++  otaRestartAt = millis() + 2500;                   /* let the page see "done" first */
++}
++
++/* main loop */
++void kevfmOtaLoop() {
++  if (checkQueued) { checkQueued = false; doCheck(); }
++  if (installQueued) { installQueued = false; doInstall(); }
++  if (otaRestartAt && (int32_t)(millis() - otaRestartAt) >= 0) {
++    Serial.println("##[KevFM]#\tupdate: restarting");
++    delay(100);
++    ESP.restart();
++  }
++}
++
++/* ---------------------------------------------------------------- web handlers */
++static void sendJson(AsyncWebServerRequest *request, const String &json, int code = 200) {
++  AsyncWebServerResponse *r = request->beginResponse(code, "application/json", json);
++  r->addHeader("Cache-Control", "no-store");
++  request->send(r);
++}
++
++static void addEscaped(String &out, const char *s) {
++  out += '"';
++  for (; *s; s++) {
++    if (*s == '"' || *s == '\\') out += '\\';
++    if ((uint8_t)*s >= 0x20) out += *s;
++  }
++  out += '"';
++}
++
++static void onStatus(AsyncWebServerRequest *request) {
++  char msg[sizeof(otaMessage)], ver[sizeof(latestVersion)];
++  bool avail; uint32_t size; otaState_e st;
++  portENTER_CRITICAL(&otaMux);
++  strlcpy(msg, otaMessage, sizeof(msg)); strlcpy(ver, latestVersion, sizeof(ver));
++  avail = updateAvailable; size = latestSize; st = otaState;
++  portEXIT_CRITICAL(&otaMux);
++  if (checkQueued) st = OTA_CHECKING;
++  if (installQueued) st = OTA_INSTALLING;
++  String out = "{\"state\":\"";
++  out += kStateName[st];
++  out += "\",\"message\":"; addEscaped(out, msg);
++  out += ",\"current\":\"" KEVFM_VERSION "\",\"latest\":"; addEscaped(out, ver);
++  out += ",\"available\":"; out += avail ? "true" : "false";
++  out += ",\"size\":"; out += size;
++  out += ",\"progress\":"; out += otaProgress;
++  out += ",\"repo\":\"" KEVFM_UPDATE_BASE "\"}";
++  sendJson(request, out);
++}
++
++static void onCheck(AsyncWebServerRequest *request) {
++  if (kevfmOtaBusy()) { sendJson(request, "{\"ok\":false,\"error\":\"An update is already running.\"}", 409); return; }
++  checkQueued = true;
++  sendJson(request, "{\"ok\":true}");
++}
++
++static void onInstall(AsyncWebServerRequest *request) {
++  if (kevfmOtaBusy()) { sendJson(request, "{\"ok\":false,\"error\":\"An update is already running.\"}", 409); return; }
++  if (!updateAvailable) { sendJson(request, "{\"ok\":false,\"error\":\"Check for an update first.\"}", 409); return; }
++  installQueued = true;
++  sendJson(request, "{\"ok\":true}");
++}
++
++/* manual .bin upload: runs on the web server's task, like yoRadio's own /update */
++static void onUploadData(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
++  if (!index) {
++    uploadOk = false; uploadError[0] = 0;
++    if (otaState == OTA_INSTALLING || checkQueued || installQueued || otaRestartAt) { strlcpy(uploadError, "An update is already running.", sizeof(uploadError)); return; }
++    uploadActive = true;
++    otaProgress = 0;
++    setMsg(OTA_INSTALLING, "Receiving %s...", filename.c_str());
++    player.sendCommand({PR_STOP, 0});
++    if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
++      snprintf(uploadError, sizeof(uploadError), "Couldn't start writing the firmware (error %u).", Update.getError());
++      uploadActive = false;
++      return;
++    }
++  }
++  if (!uploadActive || uploadError[0]) return;
++  if (len && Update.write(data, len) != len) {
++    snprintf(uploadError, sizeof(uploadError), "Writing the firmware failed (error %u).", Update.getError());
++    Update.abort();
++    uploadActive = false;
++    return;
++  }
++  size_t total = request->contentLength();
++  if (total) otaProgress = (uint8_t)min((size_t)99, (index + len) * 100 / total);
++  if (final) {
++    if (Update.end(true)) uploadOk = true;
++    else snprintf(uploadError, sizeof(uploadError), "That file isn't valid firmware for this radio (error %u). Nothing was changed.", Update.getError());
++    uploadActive = false;
++  }
++}
++
++static void onUploadDone(AsyncWebServerRequest *request) {
++  if (uploadOk) {
++    otaProgress = 100;
++    setMsg(OTA_DONE, "Firmware file installed. The radio is restarting...");
++    otaRestartAt = millis() + 2500;
++    sendJson(request, "{\"ok\":true}");
++  } else {
++    const char *err = uploadError[0] ? uploadError : "The upload didn't arrive.";
++    setMsg(OTA_FAILED, "%s", err);
++    player.sendCommand({PR_PLAY, 1});
++    String out = "{\"ok\":false,\"error\":"; addEscaped(out, err); out += '}';
++    sendJson(request, out, 400);
++  }
++}
++
++void kevfmOtaBegin(AsyncWebServer &server) {
++  server.on("/kevfm/update/status", HTTP_GET, onStatus);
++  server.on("/kevfm/update/check", HTTP_POST, onCheck);
++  server.on("/kevfm/update/install", HTTP_POST, onInstall);
++  server.on("/kevfm/update/upload", HTTP_POST, onUploadDone, onUploadData);
++}
+diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.h yoRadio/src/plugins/KevFM/kevfm_ota.h
+--- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.h	1969-12-31 19:00:00.000000000 -0500
++++ yoRadio/src/plugins/KevFM/kevfm_ota.h	2026-10-25 20:57:34.029499500 -0400
+@@ -0,0 +1,11 @@
++#ifndef KEVFM_OTA_H
++#define KEVFM_OTA_H
++
++#include "../../AsyncWebServer/ESPAsyncWebServer.h"
++
++/* kevfm_ota.cpp: GitHub check/install and .bin upload (see the comment at its top) */
++void kevfmOtaBegin(AsyncWebServer &server);
++void kevfmOtaLoop();     /* main loop: runs a queued check/install, restarts when done */
++bool kevfmOtaBusy();     /* checking, installing, receiving an upload, or about to restart */
++
++#endif
+diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_station.h yoRadio/src/plugins/KevFM/kevfm_station.h
+--- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_station.h	1969-12-31 19:00:00.000000000 -0500
++++ yoRadio/src/plugins/KevFM/kevfm_station.h	2026-10-25 11:09:43.916104300 -0400
+@@ -0,0 +1,16 @@
++#ifndef KEVFM_STATION_H
++#define KEVFM_STATION_H
++
++/*  The one and only station this radio plays.
++    The radio rewrites its station list to exactly this line at every boot, so a change here
++    plus a re-flash is all it takes (e.g. when the domain name replaces the IP).  */
++
++#define KEVFM_STATION_NAME   "The Mighty KevFM"
++
++/*  Icecast on AWS Lightsail (Montreal), port 8000. Plain http (the ESP32 decodes MP3 over http
++    with far less memory than https).  */
++#ifndef KEVFM_STREAM_URL
++  #define KEVFM_STREAM_URL   "http://15.175.80.104:8000/k874b8cb4ef7a9d88"
++#endif
++
++#endif
+diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_version.h yoRadio/src/plugins/KevFM/kevfm_version.h
+--- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_version.h	1969-12-31 19:00:00.000000000 -0500
++++ yoRadio/src/plugins/KevFM/kevfm_version.h	2026-10-25 22:06:28.477841300 -0400
+@@ -0,0 +1,17 @@
++#ifndef KEVFM_VERSION_H
++#define KEVFM_VERSION_H
++
++/*  KevFM radio firmware version. Bump it for every release published to GitHub: the radio
++    offers an update when update.json's "version" is higher than this.  */
++#define KEVFM_VERSION        "0.2.1"
++
++/*  Where "Check for update" looks: the public GitHub repo, read as plain raw files
++    (the same simple pattern as the Bubs stock ticker). update.json, the .bin and the
++    web files are all fetched from here.  */
++#ifndef KEVFM_UPDATE_BASE
++  #define KEVFM_UPDATE_BASE  "https://raw.githubusercontent.com/LordKev007/kevfm-radio/main/"
++#endif
++#define KEVFM_UPDATE_MANIFEST  KEVFM_UPDATE_BASE "update.json"
++#define KEVFM_UPDATE_WEBDIR    "yoRadio/data/www/"   /* web files' folder in the repo */
++
++#endif
+diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_web.cpp yoRadio/src/plugins/KevFM/kevfm_web.cpp
+--- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_web.cpp	1969-12-31 19:00:00.000000000 -0500
++++ yoRadio/src/plugins/KevFM/kevfm_web.cpp	2026-10-25 20:58:07.803394900 -0400
+@@ -0,0 +1,307 @@
++/*
++ * KevFM radio web pages and endpoints (see README.md, "Web pages").
++ *
++ *   /                 KevFM player page (setup page while the radio is in hotspot mode)
++ *   /setup            Wi-Fi setup page (scan list + type it in), also reachable when connected
++ *   /firmware         version, check GitHub for an update, upload a .bin (kevfm_ota.cpp)
++ *   /settings.html    yoRadio's own pages, kept for Kevin
++ *   GET  /kevfm/status    now playing, volume, sleep timer, light, Wi-Fi
++ *   POST /kevfm/set       volume=0..254 | sleep=0/10/15/30/60 | light=0..2
++ *   GET  /kevfm/scan      Wi-Fi networks nearby (starts a scan; ?refresh=1 rescans)
++ *   GET  /kevfm/networks  saved network names (never the passwords)
++ *   POST /kevfm/wifi      ssid, pass: save as first choice, restart
++ *   POST /kevfm/forget    ssid: remove a saved network
++ *
++ * Handlers run on the web server's task: they only read state or leave a request for the
++ * main loop (kevfm.webSleep / webLight / restartAt), except volume, which goes through
++ * yoRadio's player queue like the knob.
++ */
++#include "kevfm.h"
++#include "kevfm_station.h"
++#include "kevfm_ota.h"
++#include "kevfm_version.h"
++#include "../../core/options.h"
++#include "../../core/config.h"
++#include "../../core/player.h"
++#include "../../core/network.h"
++#include "../../AsyncWebServer/ESPAsyncWebServer.h"
++#include <SPIFFS.h>
++#include <WiFi.h>
++#include <DNSServer.h>
++
++void handleIndex(AsyncWebServerRequest *request);   /* yoRadio, netserver.cpp */
++
++static DNSServer dns;
++static bool dnsStarted = false;
++static bool firstScanStarted = false;
++static String scanJson;                             /* last finished scan, as a JSON array */
++static portMUX_TYPE scanMux = portMUX_INITIALIZER_UNLOCKED;
++
++static const uint8_t KEVFM_MAX_NETWORKS = 5;        /* yoRadio's config.ssids[5] */
++static const uint8_t KEVFM_MAX_SSID = 29;           /* yoRadio's ssid[30] */
++static const uint8_t KEVFM_MAX_PASS = 39;           /* yoRadio's password[40] */
++
++/* ---------------------------------------------------------------- helpers */
++static void jsonEscape(String &out, const char *s) {
++  out += '"';
++  for (; *s; s++) {
++    char c = *s;
++    if (c == '"' || c == '\\') { out += '\\'; out += c; }
++    else if ((uint8_t)c < 0x20) { char b[8]; snprintf(b, sizeof(b), "\\u%04x", c); out += b; }
++    else out += c;
++  }
++  out += '"';
++}
++
++static void sendPage(AsyncWebServerRequest *request, const char *path) {
++  if (!SPIFFS.exists(path)) { handleIndex(request); return; }
++  AsyncWebServerResponse *r = request->beginResponse(SPIFFS, path, "text/html");
++  r->addHeader("Cache-Control", "no-cache");
++  request->send(r);
++}
++
++static void sendJson(AsyncWebServerRequest *request, const String &json, int code = 200) {
++  AsyncWebServerResponse *r = request->beginResponse(code, "application/json", json);
++  r->addHeader("Cache-Control", "no-store");
++  request->send(r);
++}
++
++static String param(AsyncWebServerRequest *request, const char *name) {
++  if (request->hasParam(name, true)) return request->getParam(name, true)->value();
++  if (request->hasParam(name)) return request->getParam(name)->value();
++  return String();
++}
++
++/* saved networks as (ssid, pass) lines, in file order */
++static uint8_t readSaved(String ssids[], String passes[], uint8_t max) {
++  uint8_t n = 0;
++  File f = SPIFFS.open(SSIDS_PATH, "r");
++  if (!f) return 0;
++  while (f.available() && n < max) {
++    String line = f.readStringUntil('\n');
++    line.replace("\r", "");
++    int tab = line.indexOf('\t');
++    if (tab <= 0) continue;
++    ssids[n] = line.substring(0, tab);
++    passes[n] = line.substring(tab + 1);
++    n++;
++  }
++  f.close();
++  return n;
++}
++
++static bool writeSaved(String ssids[], String passes[], uint8_t n) {
++  File f = SPIFFS.open(SSIDS_PATH, "w");
++  if (!f) return false;
++  for (uint8_t i = 0; i < n; i++) { f.print(ssids[i]); f.print('\t'); f.print(passes[i]); f.print('\n'); }
++  f.close();
++  return true;
++}
++
++/* ---------------------------------------------------------------- Wi-Fi scan */
++static void startScan() {
++  if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) return;
++  WiFi.scanDelete();
++  WiFi.scanNetworks(true, false);                   /* async, no hidden networks */
++}
++
++/* if a scan has finished, turn it into JSON (strongest first, one entry per name) */
++static void collectScan() {
++  int n = WiFi.scanComplete();
++  if (n < 0) return;
++  struct Net { String ssid; int rssi; bool open; };
++  Net *nets = new Net[n > 0 ? n : 1];
++  int count = 0;
++  for (int i = 0; i < n; i++) {
++    String s = WiFi.SSID(i);
++    if (!s.length() || s.length() > KEVFM_MAX_SSID) continue;
++    if (s.startsWith("KevFM-Radio")) continue;       /* our own or another radio's setup hotspot */
++    int rssi = WiFi.RSSI(i);
++    bool open = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
++    int j = 0;
++    for (; j < count; j++) if (nets[j].ssid == s) break;
++    if (j < count) { if (rssi > nets[j].rssi) nets[j].rssi = rssi; continue; }
++    nets[count++] = {s, rssi, open};
++  }
++  for (int i = 1; i < count; i++)                   /* strongest first */
++    for (int j = i; j > 0 && nets[j].rssi > nets[j - 1].rssi; j--) { Net t = nets[j]; nets[j] = nets[j - 1]; nets[j - 1] = t; }
++  String out = "[";
++  for (int i = 0; i < count; i++) {
++    if (i) out += ',';
++    out += "{\"ssid\":"; jsonEscape(out, nets[i].ssid.c_str());
++    out += ",\"rssi\":"; out += nets[i].rssi;
++    out += ",\"open\":"; out += nets[i].open ? "true" : "false";
++    out += '}';
++  }
++  out += ']';
++  delete[] nets;
++  WiFi.scanDelete();
++  portENTER_CRITICAL(&scanMux);
++  scanJson = out;
++  portEXIT_CRITICAL(&scanMux);
++}
++
++/* main loop: captive DNS and a first scan while in hotspot mode, so the list is ready
++   by the time a phone opens the page */
++void kevfmWebLoop() {
++  if (network.status != SOFT_AP) return;
++  if (!dnsStarted) {
++    dns.setErrorReplyCode(DNSReplyCode::NoError);
++    dnsStarted = dns.start(53, "*", WiFi.softAPIP());
++    Serial.printf("##[KevFM]#\tsetup hotspot, captive page %s\n", dnsStarted ? "on" : "FAILED");
++  }
++  dns.processNextRequest();
++  if (!firstScanStarted) { firstScanStarted = true; startScan(); }
++}
++
++/* ---------------------------------------------------------------- handlers */
++static void onRoot(AsyncWebServerRequest *request) {
++  /* yoRadio's own cases: empty file system (Web Board Uploader) and ?command=value calls */
++  if (config.emptyFS || request->params() > 0 || request->method() != HTTP_GET) { handleIndex(request); return; }
++  sendPage(request, network.status == CONNECTED ? "/www/kevfm.html" : "/www/setup.html");
++}
++
++static void onCaptive(AsyncWebServerRequest *request) {
++  /* phones probe these on a new Wi-Fi; anything but the expected answer opens the sign-in
++     sheet, which then shows the setup page */
++  if (network.status == SOFT_AP) {
++    request->redirect(String("http://") + WiFi.softAPIP().toString() + "/setup");
++  } else {
++    request->send(404, "text/plain", "Not found");
++  }
++}
++
++static void onStatus(AsyncWebServerRequest *request) {
++  char title[BUFLEN], name[BUFLEN];
++  strlcpy(title, config.station.title, sizeof(title));
++  strlcpy(name, config.station.name, sizeof(name));
++  String out = "{\"station\":";
++  jsonEscape(out, name[0] ? name : KEVFM_STATION_NAME);
++  out += ",\"title\":"; jsonEscape(out, title);
++  out += ",\"playing\":"; out += player.status() == PLAYING ? "true" : "false";
++  out += ",\"volume\":"; out += config.store.volume;
++  out += ",\"sleep\":"; out += kevfm.sleepSetting();
++  out += ",\"left\":"; out += kevfm.sleepSecondsLeft();
++  out += ",\"light\":"; out += kevfm.lightMode();
++  out += ",\"mode\":"; jsonEscape(out, network.status == CONNECTED ? "connected" : "hotspot");
++  out += ",\"ssid\":"; jsonEscape(out, network.status == CONNECTED ? WiFi.SSID().c_str() : "");
++  out += ",\"rssi\":"; out += network.status == CONNECTED ? WiFi.RSSI() : 0;
++  out += ",\"ip\":"; jsonEscape(out, (network.status == CONNECTED ? WiFi.localIP() : WiFi.softAPIP()).toString().c_str());
++  out += ",\"version\":"; jsonEscape(out, KEVFM_VERSION);
++  out += '}';
++  sendJson(request, out);
++}
++
++static void onSet(AsyncWebServerRequest *request) {
++  String v = param(request, "volume");
++  if (v.length()) {
++    int vol = v.toInt();
++    if (vol < 0) vol = 0;
++    if (vol > 254) vol = 254;
++    player.setVol((uint8_t)vol);
++  }
++  v = param(request, "sleep");
++  if (v.length()) {
++    int m = v.toInt();
++    if (m == 0 || m == 10 || m == 15 || m == 30 || m == 60) kevfm.webSleep = (int8_t)m;
++    else { sendJson(request, "{\"ok\":false,\"error\":\"sleep must be 0, 10, 15, 30 or 60\"}", 400); return; }
++  }
++  v = param(request, "light");
++  if (v.length()) {
++    int l = v.toInt();
++    if (l >= 0 && l <= 2) kevfm.webLight = (int8_t)l;
++    else { sendJson(request, "{\"ok\":false,\"error\":\"light must be 0, 1 or 2\"}", 400); return; }
++  }
++  sendJson(request, "{\"ok\":true}");
++}
++
++static void onScan(AsyncWebServerRequest *request) {
++  collectScan();
++  bool refresh = request->hasParam("refresh");
++  String cached;
++  portENTER_CRITICAL(&scanMux);
++  cached = scanJson;
++  portEXIT_CRITICAL(&scanMux);
++  bool running = WiFi.scanComplete() == WIFI_SCAN_RUNNING;
++  if ((refresh || !cached.length()) && !running) { startScan(); running = true; }
++  String out = "{\"scanning\":";
++  out += running ? "true" : "false";
++  out += ",\"networks\":";
++  out += cached.length() ? cached : String("[]");
++  out += '}';
++  sendJson(request, out);
++}
++
++static void onNetworks(AsyncWebServerRequest *request) {
++  String ssids[KEVFM_MAX_NETWORKS], passes[KEVFM_MAX_NETWORKS];
++  uint8_t n = readSaved(ssids, passes, KEVFM_MAX_NETWORKS);
++  String out = "{\"max\":";
++  out += KEVFM_MAX_NETWORKS;
++  out += ",\"saved\":[";
++  for (uint8_t i = 0; i < n; i++) { if (i) out += ','; jsonEscape(out, ssids[i].c_str()); }
++  out += "]}";
++  sendJson(request, out);
++}
++
++static bool validText(const String &s) {
++  for (size_t i = 0; i < s.length(); i++) if (s[i] == '\t' || s[i] == '\n' || s[i] == '\r') return false;
++  return true;
++}
++
++static void onWifi(AsyncWebServerRequest *request) {
++  String ssid = param(request, "ssid"), pass = param(request, "pass");
++  if (!ssid.length() || ssid.length() > KEVFM_MAX_SSID || !validText(ssid)) {
++    sendJson(request, "{\"ok\":false,\"error\":\"The network name must be 1 to 29 characters.\"}", 400); return;
++  }
++  if (pass.length() > KEVFM_MAX_PASS || !validText(pass) || (pass.length() > 0 && pass.length() < 8)) {
++    sendJson(request, "{\"ok\":false,\"error\":\"The password must be 8 to 39 characters (or empty for an open network).\"}", 400); return;
++  }
++  String ssids[KEVFM_MAX_NETWORKS + 1], passes[KEVFM_MAX_NETWORKS + 1];
++  String oldS[KEVFM_MAX_NETWORKS], oldP[KEVFM_MAX_NETWORKS];
++  uint8_t old = readSaved(oldS, oldP, KEVFM_MAX_NETWORKS);
++  uint8_t n = 0;
++  ssids[n] = ssid; passes[n] = pass; n++;          /* new one first: tried first after restart */
++  for (uint8_t i = 0; i < old && n < KEVFM_MAX_NETWORKS; i++) {
++    if (oldS[i] == ssid) continue;
++    ssids[n] = oldS[i]; passes[n] = oldP[i]; n++;
++  }
++  if (!writeSaved(ssids, passes, n)) { sendJson(request, "{\"ok\":false,\"error\":\"Could not save.\"}", 500); return; }
++  Serial.printf("##[KevFM]#\tWi-Fi saved: %s (%u networks)\n", ssid.c_str(), n);
++  kevfm.restartAt = millis() + 2000;               /* let this answer reach the phone first */
++  sendJson(request, "{\"ok\":true}");
++}
++
++static void onForget(AsyncWebServerRequest *request) {
++  String ssid = param(request, "ssid");
++  String ssids[KEVFM_MAX_NETWORKS], passes[KEVFM_MAX_NETWORKS];
++  uint8_t old = readSaved(ssids, passes, KEVFM_MAX_NETWORKS), n = 0;
++  for (uint8_t i = 0; i < old; i++) {
++    if (ssids[i] == ssid) continue;
++    ssids[n] = ssids[i]; passes[n] = passes[i]; n++;
++  }
++  if (n == old) { sendJson(request, "{\"ok\":false,\"error\":\"Not saved.\"}", 404); return; }
++  if (!writeSaved(ssids, passes, n)) { sendJson(request, "{\"ok\":false,\"error\":\"Could not save.\"}", 500); return; }
++  config.saveValue(&config.store.lastSSID, (uint8_t)0);   /* indexes moved; start from the top next boot */
++  sendJson(request, "{\"ok\":true}");
++}
++
++/* called by the KevFM patch in NetServer::begin(), before yoRadio adds its own "/" */
++void kevfm_web_begin(AsyncWebServer &server) {
++  server.on("/", HTTP_ANY, onRoot);
++  server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, "/www/setup.html"); });
++  server.on("/firmware", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, "/www/firmware.html"); });
++  kevfmOtaBegin(server);
++  server.on("/kevfm/status", HTTP_GET, onStatus);
++  server.on("/kevfm/set", HTTP_POST, onSet);
++  server.on("/kevfm/scan", HTTP_GET, onScan);
++  server.on("/kevfm/networks", HTTP_GET, onNetworks);
++  server.on("/kevfm/wifi", HTTP_POST, onWifi);
++  server.on("/kevfm/forget", HTTP_POST, onForget);
++  static const char *const probes[] = {
++    "/hotspot-detect.html", "/library/test/success.html",             /* Apple */
++    "/generate_204", "/gen_204",                                      /* Android */
++    "/connecttest.txt", "/ncsi.txt", "/redirect", "/fwlink",          /* Windows */
++    "/canonical.html", "/success.txt"                                 /* Firefox, others */
++  };
++  for (const char *p : probes) server.on(p, HTTP_ANY, onCaptive);
++}

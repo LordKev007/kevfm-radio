@@ -1,0 +1,10 @@
+{
+  "version": "0.2.1",
+  "file": "kevfm-radio.bin",
+  "size": 1517184,
+  "web": [
+    "kevfm.html",
+    "setup.html",
+    "firmware.html"
+  ]
+}

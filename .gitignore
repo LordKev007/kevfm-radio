@@ -1,0 +1,7 @@
+# build output (the release .bin is kevfm-radio.bin in the repo root, made by tools/make_release.py)
+build/
+yoRadio/build/
+*.log
+# untouched upstream clone, kept locally for diffing; upstream lives at github.com/e2002/yoradio
+upstream_yoradio/
+__pycache__/

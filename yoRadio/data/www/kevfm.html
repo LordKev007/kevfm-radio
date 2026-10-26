@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="KevFM Radio">
+<title>The Mighty KevFM</title>
+<style>
+  :root { color-scheme: dark; --bg: #0b0f14; --card: #131a22; --line: #2a3542; --ink: #eef2f6; --muted: #8b98a7; --accent: #f2a33a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); font: 16px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px 16px calc(24px + env(safe-area-inset-bottom)); text-align: center; }
+  #logo { width: min(64vw, 260px); aspect-ratio: 1 / 1; border-radius: 14px; object-fit: cover; background: #000; box-shadow: 0 6px 24px rgba(0, 0, 0, .55); }
+  .card { width: 100%; max-width: 420px; background: var(--card); border-radius: 18px; padding: 24px 20px; }
+  #title { font-size: 1.5rem; font-weight: 650; margin: 0 0 6px; overflow-wrap: anywhere; }
+  #artist { margin: 0; color: var(--muted); font-size: 1.05rem; overflow-wrap: anywhere; }
+  #onair { margin: 14px 0 0; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  #onair.live { color: var(--accent); }
+  #onair.live::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 7px; vertical-align: 1px; animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .vol { display: flex; align-items: center; gap: 12px; margin-top: 22px; }
+  .round { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+  .round svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .round:active { transform: scale(.94); }
+  input[type=range] { flex: 1; -webkit-appearance: none; appearance: none; height: 8px; border-radius: 4px; background: var(--line); outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); border: 0; }
+  input[type=range]::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); border: 0; }
+  #volnum { margin: 8px 0 0; color: var(--muted); font-size: .85rem; font-variant-numeric: tabular-nums; }
+  .group { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .label { color: var(--muted); font-size: .85rem; min-height: 1.2em; font-variant-numeric: tabular-nums; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .chip { padding: 9px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: .85rem; white-space: nowrap; cursor: pointer; }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: #1a1205; font-weight: 650; }
+  footer { color: var(--muted); font-size: .8rem; display: flex; flex-direction: column; gap: 6px; }
+  footer a { color: var(--muted); }
+  #offline { color: #ff7a6b; font-size: .9rem; min-height: 1.2em; margin: 0; }
+</style>
+</head>
+<body>
+<main>
+  <img id="logo" src="kevfm-cover-256.jpg" alt="The Mighty KevFM" width="260" height="260">
+  <div class="card">
+    <p id="title">The Mighty KevFM</p>
+    <p id="artist">Live radio</p>
+    <p id="onair">Connecting…</p>
+    <div class="vol">
+      <button class="round" id="down" type="button" aria-label="Quieter"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+      <input type="range" id="volume" min="0" max="254" step="1" value="0" aria-label="Volume">
+      <button class="round" id="up" type="button" aria-label="Louder"><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>
+    </div>
+    <p id="volnum">Volume</p>
+  </div>
+
+  <div class="group" role="group" aria-label="Sleep timer">
+    <div class="label" id="sleeplabel">Sleep timer</div>
+    <div class="chips" id="sleep">
+      <button type="button" class="chip" data-v="0">Off</button>
+      <button type="button" class="chip" data-v="10">10 min</button>
+      <button type="button" class="chip" data-v="15">15 min</button>
+      <button type="button" class="chip" data-v="30">30 min</button>
+      <button type="button" class="chip" data-v="60">60 min</button>
+    </div>
+  </div>
+
+  <div class="group" role="group" aria-label="Radio light">
+    <div class="label">Light on the radio</div>
+    <div class="chips" id="light">
+      <button type="button" class="chip" data-v="0">When touched</button>
+      <button type="button" class="chip" data-v="1">Always on</button>
+      <button type="button" class="chip" data-v="2">Off</button>
+    </div>
+  </div>
+
+  <p id="offline"></p>
+  <footer>
+    <span id="wifi"></span>
+    <span><a href="/setup">Wi-Fi settings</a> · <a href="/firmware">Firmware</a> · <a href="/settings.html">Advanced</a></span>
+  </footer>
+</main>
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var STATION = "The Mighty KevFM";
+  var vol = $("volume"), dragging = false, volTimer = null, pending = {}, lastSent = 0;
+  var sleepLeft = 0, sleepAt = 0;
+
+  function post(data) {
+    lastSent = Date.now();
+    return fetch("/kevfm/set", { method: "POST", body: new URLSearchParams(data) }).catch(function () {});
+  }
+  function pct(v) { return Math.round(v / 254 * 100); }
+  function paintVol() {
+    var p = vol.value / 254 * 100;
+    vol.style.background = "linear-gradient(to right, var(--accent) " + p + "%, var(--line) " + p + "%)";
+    $("volnum").textContent = "Volume " + pct(vol.value) + "%";
+  }
+  function sendVol() { clearTimeout(volTimer); volTimer = setTimeout(function () { post({ volume: vol.value }); }, 120); }
+  vol.addEventListener("input", function () { dragging = true; paintVol(); sendVol(); });
+  vol.addEventListener("change", function () { dragging = false; });
+  function step(d) { vol.value = Math.max(0, Math.min(254, +vol.value + d)); paintVol(); sendVol(); }
+  $("down").addEventListener("click", function () { step(-6); });
+  $("up").addEventListener("click", function () { step(6); });
+
+  function mark(groupId, value) {
+    Array.prototype.forEach.call($(groupId).querySelectorAll(".chip"), function (c) { c.classList.toggle("on", +c.dataset.v === value); });
+  }
+  function chips(groupId, key) {
+    $(groupId).addEventListener("click", function (e) {
+      var c = e.target.closest ? e.target.closest(".chip") : null;
+      if (!c) return;
+      var v = +c.dataset.v, d = {}; d[key] = v;
+      mark(groupId, v); pending[key] = Date.now();
+      if (key === "sleep") { sleepLeft = v * 60; sleepAt = Date.now(); showSleep(); }
+      post(d);
+    });
+  }
+  chips("sleep", "sleep"); chips("light", "light");
+
+  function clock(s) { var m = Math.floor(s / 60), r = s % 60; return m + ":" + (r < 10 ? "0" : "") + r; }
+  function showSleep() {
+    var left = sleepLeft - Math.floor((Date.now() - sleepAt) / 1000);
+    $("sleeplabel").textContent = sleepLeft > 0 && left > 0 ? "Radio sleeps in " + clock(left) : "Sleep timer";
+  }
+  setInterval(showSleep, 1000);
+
+  function split(t) {
+    t = String(t || "").trim();
+    var at = t.indexOf(" - ");
+    if (at > 0) return { title: t.slice(at + 3).trim(), artist: t.slice(0, at).trim() };
+    return { title: STATION, artist: "Live radio" };
+  }
+  function fresh(key) { return pending[key] && Date.now() - pending[key] < 3000; }
+
+  function poll() {
+    fetch("/kevfm/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) {
+      $("offline").textContent = "";
+      var connecting = !st.title || st.title.charAt(0) === "[";
+      var s = connecting ? { title: STATION, artist: "Live radio" } : split(st.title);
+      $("title").textContent = s.title;
+      $("artist").textContent = s.artist;
+      document.title = s.title === STATION ? STATION : s.title + " - " + s.artist;
+      var live = st.playing && !connecting;
+      $("onair").textContent = live ? "On air" : "Connecting…";
+      $("onair").classList.toggle("live", live);
+      if (!dragging && Date.now() - lastSent > 2500) { vol.value = st.volume; paintVol(); }
+      if (!fresh("sleep")) { mark("sleep", st.sleep); sleepLeft = st.left; sleepAt = Date.now(); showSleep(); }
+      if (!fresh("light")) mark("light", st.light);
+      $("wifi").textContent = st.ssid ? "Wi-Fi: " + st.ssid + (st.rssi ? " (" + (st.rssi >= -60 ? "strong" : st.rssi >= -72 ? "good" : "weak") + " signal)" : "") : "";
+    }).catch(function () {
+      $("offline").textContent = "Can't reach the radio. Is it on, and is this phone on the same Wi-Fi?";
+    }).then(function () { setTimeout(poll, 2000); });
+  }
+  paintVol();
+  poll();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<title>KevFM Radio Wi-Fi</title>
+<style>
+  :root { color-scheme: dark; --bg: #0b0f14; --card: #131a22; --line: #2a3542; --ink: #eef2f6; --muted: #8b98a7; --accent: #f2a33a; --bad: #ff7a6b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 460px; margin: 0 auto; padding: 22px 16px calc(28px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 16px; }
+  header { display: flex; align-items: center; gap: 14px; }
+  header img { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; background: #000; }
+  h1 { margin: 0; font-size: 1.25rem; }
+  .sub { margin: 2px 0 0; color: var(--muted); font-size: .9rem; }
+  h2 { margin: 6px 0 0; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); display: flex; justify-content: space-between; align-items: center; }
+  .card { background: var(--card); border-radius: 16px; overflow: hidden; }
+  .net { border-bottom: 1px solid var(--line); }
+  .net:last-child { border-bottom: 0; }
+  .row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 16px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .row .name { flex: 1; overflow-wrap: anywhere; }
+  .tag { font-size: .75rem; color: var(--muted); }
+  .bars { display: flex; align-items: flex-end; gap: 2px; height: 16px; }
+  .bars i { width: 4px; background: var(--line); border-radius: 1px; }
+  .bars i.on { background: var(--ink); }
+  .lock { width: 14px; height: 14px; fill: var(--muted); }
+  .form { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+  label { font-size: .85rem; color: var(--muted); }
+  input[type=text], input[type=password] { width: 100%; padding: 13px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; font-size: 16px; }
+  input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .show { display: flex; align-items: center; gap: 8px; font-size: .9rem; color: var(--muted); }
+  .btn { padding: 13px 16px; border-radius: 999px; border: 0; background: var(--accent); color: #1a1205; font: inherit; font-weight: 650; cursor: pointer; }
+  .btn:disabled { opacity: .5; }
+  .link { background: none; border: 0; color: var(--accent); font: inherit; font-size: .9rem; padding: 6px 0; cursor: pointer; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  .err { color: var(--bad); font-size: .9rem; min-height: 1.2em; margin: 0; }
+  .empty { padding: 16px; color: var(--muted); }
+  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s 0.8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  @keyframes s { to { transform: rotate(360deg); } }
+  .done { text-align: center; padding: 28px 18px; }
+  .done h2 { justify-content: center; font-size: 1rem; margin-bottom: 10px; }
+  .hidden { display: none !important; }
+  .saved .row { cursor: default; }
+  footer { text-align: center; }
+  footer a { color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+<main id="main">
+  <header>
+    <img src="kevfm-cover-256.jpg" alt="">
+    <div>
+      <h1>Your KevFM radio</h1>
+      <p class="sub" id="sub">Let's get it on your Wi-Fi.</p>
+    </div>
+  </header>
+
+  <section id="pick">
+    <h2><span>Choose your Wi-Fi</span><button class="link" id="refresh" type="button">Refresh</button></h2>
+    <div class="card" id="list"><div class="empty"><span class="spin"></span>Looking for networks…</div></div>
+    <p><button class="link" id="manualbtn" type="button">My network isn't listed: type its name</button></p>
+    <div class="card hidden" id="manual">
+      <div class="form" style="padding-top:16px">
+        <label for="mssid">Network name</label>
+        <input type="text" id="mssid" maxlength="29" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <label for="mpass">Password</label>
+        <input type="password" id="mpass" maxlength="39" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <label class="show"><input type="checkbox" data-for="mpass"> Show password</label>
+        <p class="err" id="merr"></p>
+        <button class="btn" type="button" id="msave">Connect</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="savedwrap" class="hidden">
+    <h2><span>Saved networks</span></h2>
+    <div class="card saved" id="saved"></div>
+    <p class="muted">The radio tries these in order and remembers up to <span id="max">5</span>.</p>
+  </section>
+
+  <section id="done" class="card done hidden">
+    <h2>Saved</h2>
+    <p id="donetext"></p>
+    <p class="muted">If it can't join, the <b>KevFM-Radio</b> Wi-Fi comes back in about a minute so you can try again.</p>
+  </section>
+
+  <footer id="back" class="hidden"><a href="/">Back to the radio</a></footer>
+</main>
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var connected = false, open = null, savedNames = [];
+
+  function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+  function bars(rssi) {
+    var n = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1, h = "";
+    for (var i = 1; i <= 4; i++) h += '<i class="' + (i <= n ? "on" : "") + '" style="height:' + (i * 4) + 'px"></i>';
+    return '<span class="bars" aria-label="signal ' + n + ' of 4">' + h + "</span>";
+  }
+  var LOCK = '<svg class="lock" viewBox="0 0 24 24" aria-label="needs a password"><path d="M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V11a1 1 0 0 1 1-1zm2 0h6V7a3 3 0 0 0-6 0z"/></svg>';
+
+  function post(url, data) {
+    var body = new URLSearchParams(data);
+    return fetch(url, { method: "POST", body: body }).then(function (r) {
+      return r.json().catch(function () { return { ok: r.ok }; });
+    });
+  }
+
+  function check(ssid, pass, needPass) {
+    if (!ssid) return "Enter the network name.";
+    if (ssid.length > 29) return "The radio can only use network names up to 29 characters.";
+    if (needPass && !pass) return "Enter the Wi-Fi password.";
+    if (pass && pass.length < 8) return "Wi-Fi passwords are at least 8 characters.";
+    if (pass.length > 39) return "The radio can only use passwords up to 39 characters.";
+    return "";
+  }
+
+  function save(ssid, pass, errEl, btn) {
+    var problem = check(ssid, pass, false);
+    if (problem) { errEl.textContent = problem; return; }
+    errEl.textContent = ""; btn.disabled = true; btn.textContent = "Saving…";
+    post("/kevfm/wifi", { ssid: ssid, pass: pass }).then(function (res) {
+      if (!res.ok) { errEl.textContent = res.error || "Couldn't save. Try again."; btn.disabled = false; btn.textContent = "Connect"; return; }
+      $("pick").classList.add("hidden"); $("savedwrap").classList.add("hidden"); $("back").classList.add("hidden");
+      $("donetext").innerHTML = "The radio is restarting to join <b>" + esc(ssid) + "</b>. " +
+        (connected ? "Give it about 20 seconds and KevFM starts playing."
+                   : "Put your phone back on <b>" + esc(ssid) + "</b> too. In about 20 seconds KevFM starts playing.");
+      $("done").classList.remove("hidden");
+    }).catch(function () { errEl.textContent = "The radio didn't answer. Are you still on its Wi-Fi?"; btn.disabled = false; btn.textContent = "Connect"; });
+  }
+
+  function toggleShow(e) {
+    var box = e.target; if (box.type !== "checkbox" || !box.dataset.for) return;
+    $(box.dataset.for).type = box.checked ? "text" : "password";
+  }
+  document.addEventListener("change", toggleShow);
+
+  function render(nets) {
+    var list = $("list");
+    if (!nets.length) { list.innerHTML = '<div class="empty">No networks found yet.</div>'; return; }
+    list.innerHTML = "";
+    nets.forEach(function (n, i) {
+      var div = document.createElement("div"); div.className = "net";
+      var isSaved = savedNames.indexOf(n.ssid) >= 0;
+      div.innerHTML = '<button class="row" type="button">' + bars(n.rssi) + '<span class="name">' + esc(n.ssid) +
+        (isSaved ? ' <span class="tag">saved</span>' : "") + "</span>" + (n.open ? '<span class="tag">open</span>' : LOCK) + "</button>" +
+        '<div class="form hidden">' +
+        (n.open ? '<p class="muted">Open network, no password.</p>'
+                : '<label for="p' + i + '">Password for ' + esc(n.ssid) + '</label><input type="password" id="p' + i + '" maxlength="39" autocapitalize="off" autocorrect="off" spellcheck="false">' +
+                  '<label class="show"><input type="checkbox" data-for="p' + i + '"> Show password</label>') +
+        '<p class="err"></p><button class="btn" type="button">Connect</button></div>';
+      var form = div.querySelector(".form"), err = div.querySelector(".err"), btn = div.querySelector(".btn"), pw = div.querySelector("input[type=password]");
+      div.querySelector(".row").addEventListener("click", function () {
+        if (open && open !== form) open.classList.add("hidden");
+        form.classList.toggle("hidden"); open = form;
+        if (pw && !form.classList.contains("hidden")) pw.focus();
+      });
+      btn.addEventListener("click", function () {
+        var pass = pw ? pw.value : "";
+        if (!n.open && !pass) { err.textContent = "Enter the Wi-Fi password."; return; }
+        save(n.ssid, pass, err, btn);
+      });
+      if (pw) pw.addEventListener("keydown", function (e) { if (e.key === "Enter") btn.click(); });
+      list.appendChild(div);
+    });
+  }
+
+  var scanTries = 0;
+  function scan(refresh) {
+    if (refresh) { $("list").innerHTML = '<div class="empty"><span class="spin"></span>Looking for networks…</div>'; scanTries = 0; }
+    fetch("/kevfm/scan" + (refresh ? "?refresh=1" : ""), { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (res) {
+      if (res.networks.length && !refresh) render(res.networks);
+      if (res.scanning && scanTries++ < 15) { setTimeout(function () { scan(false); }, 1500); return; }
+      if (!res.scanning) render(res.networks);
+    }).catch(function () { if (scanTries++ < 15) setTimeout(function () { scan(false); }, 2000); });
+  }
+
+  function loadSaved() {
+    return fetch("/kevfm/networks", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (res) {
+      savedNames = res.saved; $("max").textContent = res.max;
+      var box = $("saved"); box.innerHTML = "";
+      $("savedwrap").classList.toggle("hidden", !res.saved.length);
+      res.saved.forEach(function (name, i) {
+        var div = document.createElement("div"); div.className = "net";
+        div.innerHTML = '<div class="row"><span class="name">' + (i + 1) + ". " + esc(name) + '</span><button class="link" type="button">Forget</button></div>';
+        div.querySelector("button").addEventListener("click", function () {
+          if (!confirm("Forget " + name + "?")) return;
+          post("/kevfm/forget", { ssid: name }).then(loadSaved);
+        });
+        box.appendChild(div);
+      });
+    }).catch(function () {});
+  }
+
+  $("refresh").addEventListener("click", function () { scan(true); });
+  $("manualbtn").addEventListener("click", function () { $("manual").classList.toggle("hidden"); $("mssid").focus(); });
+  $("msave").addEventListener("click", function () { save($("mssid").value.trim(), $("mpass").value, $("merr"), $("msave")); });
+  $("mpass").addEventListener("keydown", function (e) { if (e.key === "Enter") $("msave").click(); });
+
+  fetch("/kevfm/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) {
+    connected = st.mode === "connected";
+    if (connected) {
+      $("sub").textContent = "Connected to " + st.ssid + ". Add another network for when it moves.";
+      $("back").classList.remove("hidden");
+    }
+  }).catch(function () {});
+  loadSaved().then(function () { scan(false); });
+})();
+</script>
+</body>
+</html>
