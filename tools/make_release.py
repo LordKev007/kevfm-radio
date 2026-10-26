@@ -24,7 +24,8 @@ WEB_DIR = ROOT / "yoRadio" / "data" / "www"
 # Web files a release replaces on the radios (fetched from the repo's yoRadio/data/www/).
 # Only KevFM's own pages: yoRadio's files never change, and saved Wi-Fi is never touched.
 NUL = bytes(1)
-WEB_FILES = ["kevfm.html", "setup.html", "firmware.html"]
+APP_SLOT = 0x1C0000   # app0/app1 size in yoRadio/partitions.csv
+WEB_FILES = []   # KevFM pages are inside the firmware now (tools/embed_web.py); list storage files here only if one ever needs replacing
 
 
 def main():
@@ -42,8 +43,12 @@ def main():
     previous = json.loads(MANIFEST.read_text(encoding="utf-8")).get("version") if MANIFEST.exists() else None
     if previous == version:
         print(f"note: update.json already says {version}; radios on {version} won't see a new update")
+    if BUILT_BIN.stat().st_size > APP_SLOT:
+        sys.exit(f"build is {BUILT_BIN.stat().st_size:,} bytes, bigger than the {APP_SLOT:,}-byte app slot (yoRadio/partitions.csv)")
     shutil.copyfile(BUILT_BIN, RELEASE_BIN)
-    manifest = {"version": version, "file": RELEASE_BIN.name, "size": RELEASE_BIN.stat().st_size, "web": WEB_FILES}
+    manifest = {"version": version, "file": RELEASE_BIN.name, "size": RELEASE_BIN.stat().st_size}
+    if WEB_FILES:
+        manifest["web"] = WEB_FILES
     MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Release {version}: {RELEASE_BIN.name} ({manifest['size']:,} bytes), update.json written.")
     print("Now commit and push (see README, 'Publishing an update').")

@@ -35,7 +35,7 @@ if not exist "%B%\spiffs.bin" ( echo Missing %B%\spiffs.bin - run tools\make_spi
   0x8000   "%B%\yoRadio.ino.partitions.bin" ^
   0xe000   "%BOOTAPP0%" ^
   0x10000  "%B%\yoRadio.ino.bin" ^
-  0x3D0000 "%B%\spiffs.bin"
+  0x390000 "%B%\spiffs.bin"
 
 :done
 if errorlevel 1 ( echo FLASH FAILED & exit /b 1 )

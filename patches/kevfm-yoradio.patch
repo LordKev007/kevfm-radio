@@ -1,563 +1,5 @@
-diff -ruN -x build upstream_yoradio/yoRadio/data/www/firmware.html yoRadio/data/www/firmware.html
---- upstream_yoradio/yoRadio/data/www/firmware.html	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/data/www/firmware.html	2026-10-25 20:58:40.838026700 -0400
-@@ -0,0 +1,171 @@
-+<!doctype html>
-+<html lang="en">
-+<head>
-+<meta charset="utf-8">
-+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-+<meta name="theme-color" content="#0b0f14">
-+<title>KevFM Radio Firmware</title>
-+<style>
-+  :root { color-scheme: dark; --bg: #0b0f14; --card: #131a22; --line: #2a3542; --ink: #eef2f6; --muted: #8b98a7; --accent: #f2a33a; --good: #5fd38d; --bad: #ff7a6b; }
-+  * { box-sizing: border-box; }
-+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; }
-+  main { max-width: 460px; margin: 0 auto; padding: 22px 16px calc(28px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 16px; }
-+  header { display: flex; align-items: center; gap: 14px; }
-+  header img { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; background: #000; }
-+  h1 { margin: 0; font-size: 1.25rem; }
-+  .sub { margin: 2px 0 0; color: var(--muted); font-size: .9rem; }
-+  h2 { margin: 0 0 10px; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
-+  .card { background: var(--card); border-radius: 16px; padding: 18px 16px; }
-+  .btn { padding: 12px 18px; border-radius: 999px; border: 0; background: var(--accent); color: #1a1205; font: inherit; font-weight: 650; cursor: pointer; }
-+  .btn.quiet { background: var(--bg); color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
-+  .btn:disabled { opacity: .45; }
-+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-+  .msg { margin: 12px 0 0; min-height: 1.3em; }
-+  .msg.good { color: var(--good); } .msg.bad { color: var(--bad); }
-+  .muted { color: var(--muted); font-size: .88rem; margin: 10px 0 0; }
-+  .warn { color: var(--accent); font-size: .88rem; margin: 10px 0 0; }
-+  .bar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; margin-top: 12px; }
-+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
-+  input[type=file] { width: 100%; color: var(--muted); font: inherit; font-size: .9rem; margin: 4px 0 12px; }
-+  input[type=file]::file-selector-button { padding: 9px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; margin-right: 10px; }
-+  .hidden { display: none !important; }
-+  footer { text-align: center; }
-+  footer a { color: var(--muted); font-size: .85rem; }
-+</style>
-+</head>
-+<body>
-+<main>
-+  <header>
-+    <img src="kevfm-cover-256.jpg" alt="">
-+    <div>
-+      <h1>Radio firmware</h1>
-+      <p class="sub">This radio has version <b id="current">…</b></p>
-+    </div>
-+  </header>
-+
-+  <section class="card">
-+    <h2>Online update</h2>
-+    <div class="row">
-+      <button class="btn quiet" id="check" type="button">Check for update</button>
-+      <button class="btn hidden" id="install" type="button">Install</button>
-+    </div>
-+    <p class="msg" id="msg"></p>
-+    <div class="bar hidden" id="bar"><i id="fill"></i></div>
-+    <p class="warn hidden" id="keep">Keep the radio plugged in until it restarts. The music stops during the update.</p>
-+    <p class="muted">Looks for a newer version on GitHub (<span id="repo">LordKev007/kevfm-radio</span>). Saved Wi-Fi, volume and light settings stay.</p>
-+  </section>
-+
-+  <section class="card">
-+    <h2>Upload a firmware file</h2>
-+    <p class="muted" style="margin-top:0">If the radio can't reach GitHub, install a <b>.bin</b> file from this phone or computer instead.</p>
-+    <input type="file" id="file" accept=".bin">
-+    <button class="btn" id="upload" type="button" disabled>Install this file</button>
-+    <p class="msg" id="umsg"></p>
-+    <div class="bar hidden" id="ubar"><i id="ufill"></i></div>
-+  </section>
-+
-+  <footer><a href="/">Back to the radio</a></footer>
-+</main>
-+<script>
-+(function () {
-+  "use strict";
-+  var $ = function (id) { return document.getElementById(id); };
-+  var polling = null, waitingRestart = false;
-+
-+  function setMsg(el, text, kind) { el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
-+  function busy(on) { $("check").disabled = on; $("install").disabled = on; $("upload").disabled = on || !$("file").files.length; }
-+
-+  function waitForRestart(el) {
-+    if (waitingRestart) return;
-+    waitingRestart = true;
-+    var started = Date.now();
-+    setTimeout(function again() {
-+      fetch("/kevfm/update/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) {
-+        if (st.state === "done") { setTimeout(again, 2000); return; }   /* not restarted yet */
-+        setMsg(el, "Done. This radio now has version " + st.current + ".", "good");
-+        $("current").textContent = st.current;
-+        $("bar").classList.add("hidden"); $("ubar").classList.add("hidden"); $("keep").classList.add("hidden");
-+        $("install").classList.add("hidden"); busy(false); waitingRestart = false;
-+      }).catch(function () {
-+        if (Date.now() - started < 90000) setTimeout(again, 2000);
-+        else { setMsg(el, "The radio hasn't come back yet. Give it a minute, then reload this page.", "bad"); waitingRestart = false; }
-+      });
-+    }, 4000);
-+  }
-+
-+  function show(st) {
-+    $("current").textContent = st.current;
-+    $("repo").textContent = st.repo.replace("https://raw.githubusercontent.com/", "").replace(/\/main\/?$/, "");
-+    var kind = st.state === "failed" ? "bad" : (st.state === "done" || (st.state === "checked" && st.available)) ? "good" : "";
-+    setMsg($("msg"), st.message, kind);
-+    $("install").classList.toggle("hidden", !(st.state === "checked" && st.available));
-+    var running = st.state === "checking" || st.state === "installing" || st.state === "done";
-+    $("bar").classList.toggle("hidden", st.state !== "installing" && st.state !== "done");
-+    $("keep").classList.toggle("hidden", st.state !== "installing");
-+    $("fill").style.width = st.progress + "%";
-+    busy(running);
-+    if (st.state === "done") { setMsg($("msg"), st.message + " (about 20 seconds)", "good"); waitForRestart($("msg")); return false; }
-+    return running;
-+  }
-+
-+  function poll() {
-+    clearTimeout(polling);
-+    fetch("/kevfm/update/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) {
-+      if (show(st)) polling = setTimeout(poll, 1000);
-+    }).catch(function () { polling = setTimeout(poll, 2000); });
-+  }
-+
-+  function post(url) {
-+    return fetch(url, { method: "POST" }).then(function (r) { return r.json(); });
-+  }
-+
-+  $("check").addEventListener("click", function () {
-+    busy(true); setMsg($("msg"), "Checking GitHub…");
-+    post("/kevfm/update/check").then(function (res) {
-+      if (!res.ok) { setMsg($("msg"), res.error, "bad"); busy(false); return; }
-+      setTimeout(poll, 800);
-+    }).catch(function () { setMsg($("msg"), "The radio didn't answer.", "bad"); busy(false); });
-+  });
-+
-+  $("install").addEventListener("click", function () {
-+    if (!confirm("Install the new firmware now? The music stops for about a minute. Keep the radio plugged in.")) return;
-+    busy(true); setMsg($("msg"), "Starting the update…");
-+    post("/kevfm/update/install").then(function (res) {
-+      if (!res.ok) { setMsg($("msg"), res.error, "bad"); busy(false); return; }
-+      setTimeout(poll, 800);
-+    }).catch(function () { setMsg($("msg"), "The radio didn't answer.", "bad"); busy(false); });
-+  });
-+
-+  $("file").addEventListener("change", function () {
-+    var f = $("file").files[0];
-+    $("upload").disabled = !f;
-+    setMsg($("umsg"), f && !/\.bin$/i.test(f.name) ? "That isn't a .bin file." : "", f && !/\.bin$/i.test(f.name) ? "bad" : "");
-+  });
-+
-+  $("upload").addEventListener("click", function () {
-+    var f = $("file").files[0];
-+    if (!f) return;
-+    if (!/\.bin$/i.test(f.name)) { setMsg($("umsg"), "Choose the firmware .bin file.", "bad"); return; }
-+    if (!confirm("Install " + f.name + " on this radio? The music stops for about a minute. Keep the radio plugged in.")) return;
-+    busy(true);
-+    var form = new FormData(); form.append("firmware", f, f.name);
-+    var xhr = new XMLHttpRequest();
-+    $("ubar").classList.remove("hidden");
-+    xhr.upload.onprogress = function (e) {
-+      if (e.lengthComputable) { $("ufill").style.width = Math.round(e.loaded / e.total * 100) + "%"; setMsg($("umsg"), "Sending: " + Math.round(e.loaded / e.total * 100) + "%"); }
-+    };
-+    xhr.onload = function () {
-+      var res = {}; try { res = JSON.parse(xhr.responseText); } catch (e) {}
-+      if (xhr.status === 200 && res.ok) { $("ufill").style.width = "100%"; setMsg($("umsg"), "Installed. The radio is restarting (about 20 seconds)…", "good"); waitForRestart($("umsg")); }
-+      else { setMsg($("umsg"), res.error || "The upload failed.", "bad"); $("ubar").classList.add("hidden"); busy(false); }
-+    };
-+    xhr.onerror = function () { setMsg($("umsg"), "The upload was interrupted. Nothing was changed; try again.", "bad"); $("ubar").classList.add("hidden"); busy(false); };
-+    xhr.open("POST", "/kevfm/update/upload");
-+    xhr.send(form);
-+  });
-+
-+  poll();
-+})();
-+</script>
-+</body>
-+</html>
 Binary files upstream_yoradio/yoRadio/data/www/kevfm-cover-256.jpg and yoRadio/data/www/kevfm-cover-256.jpg differ
-diff -ruN -x build upstream_yoradio/yoRadio/data/www/kevfm.html yoRadio/data/www/kevfm.html
---- upstream_yoradio/yoRadio/data/www/kevfm.html	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/data/www/kevfm.html	2026-10-25 20:58:46.695859100 -0400
-@@ -0,0 +1,162 @@
-+<!doctype html>
-+<html lang="en">
-+<head>
-+<meta charset="utf-8">
-+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-+<meta name="theme-color" content="#0b0f14">
-+<meta name="apple-mobile-web-app-capable" content="yes">
-+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-+<meta name="apple-mobile-web-app-title" content="KevFM Radio">
-+<title>The Mighty KevFM</title>
-+<style>
-+  :root { color-scheme: dark; --bg: #0b0f14; --card: #131a22; --line: #2a3542; --ink: #eef2f6; --muted: #8b98a7; --accent: #f2a33a; }
-+  * { box-sizing: border-box; }
-+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); font: 16px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif; }
-+  main { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px 16px calc(24px + env(safe-area-inset-bottom)); text-align: center; }
-+  #logo { width: min(64vw, 260px); aspect-ratio: 1 / 1; border-radius: 14px; object-fit: cover; background: #000; box-shadow: 0 6px 24px rgba(0, 0, 0, .55); }
-+  .card { width: 100%; max-width: 420px; background: var(--card); border-radius: 18px; padding: 24px 20px; }
-+  #title { font-size: 1.5rem; font-weight: 650; margin: 0 0 6px; overflow-wrap: anywhere; }
-+  #artist { margin: 0; color: var(--muted); font-size: 1.05rem; overflow-wrap: anywhere; }
-+  #onair { margin: 14px 0 0; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
-+  #onair.live { color: var(--accent); }
-+  #onair.live::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 7px; vertical-align: 1px; animation: pulse 2s ease-in-out infinite; }
-+  @keyframes pulse { 50% { opacity: .3; } }
-+  .vol { display: flex; align-items: center; gap: 12px; margin-top: 22px; }
-+  .round { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
-+  .round svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-+  .round:active { transform: scale(.94); }
-+  input[type=range] { flex: 1; -webkit-appearance: none; appearance: none; height: 8px; border-radius: 4px; background: var(--line); outline: none; }
-+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); border: 0; }
-+  input[type=range]::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); border: 0; }
-+  #volnum { margin: 8px 0 0; color: var(--muted); font-size: .85rem; font-variant-numeric: tabular-nums; }
-+  .group { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-+  .label { color: var(--muted); font-size: .85rem; min-height: 1.2em; font-variant-numeric: tabular-nums; }
-+  .chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
-+  .chip { padding: 9px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: .85rem; white-space: nowrap; cursor: pointer; }
-+  .chip.on { background: var(--accent); border-color: var(--accent); color: #1a1205; font-weight: 650; }
-+  footer { color: var(--muted); font-size: .8rem; display: flex; flex-direction: column; gap: 6px; }
-+  footer a { color: var(--muted); }
-+  #offline { color: #ff7a6b; font-size: .9rem; min-height: 1.2em; margin: 0; }
-+</style>
-+</head>
-+<body>
-+<main>
-+  <img id="logo" src="kevfm-cover-256.jpg" alt="The Mighty KevFM" width="260" height="260">
-+  <div class="card">
-+    <p id="title">The Mighty KevFM</p>
-+    <p id="artist">Live radio</p>
-+    <p id="onair">Connecting…</p>
-+    <div class="vol">
-+      <button class="round" id="down" type="button" aria-label="Quieter"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
-+      <input type="range" id="volume" min="0" max="254" step="1" value="0" aria-label="Volume">
-+      <button class="round" id="up" type="button" aria-label="Louder"><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>
-+    </div>
-+    <p id="volnum">Volume</p>
-+  </div>
-+
-+  <div class="group" role="group" aria-label="Sleep timer">
-+    <div class="label" id="sleeplabel">Sleep timer</div>
-+    <div class="chips" id="sleep">
-+      <button type="button" class="chip" data-v="0">Off</button>
-+      <button type="button" class="chip" data-v="10">10 min</button>
-+      <button type="button" class="chip" data-v="15">15 min</button>
-+      <button type="button" class="chip" data-v="30">30 min</button>
-+      <button type="button" class="chip" data-v="60">60 min</button>
-+    </div>
-+  </div>
-+
-+  <div class="group" role="group" aria-label="Radio light">
-+    <div class="label">Light on the radio</div>
-+    <div class="chips" id="light">
-+      <button type="button" class="chip" data-v="0">When touched</button>
-+      <button type="button" class="chip" data-v="1">Always on</button>
-+      <button type="button" class="chip" data-v="2">Off</button>
-+    </div>
-+  </div>
-+
-+  <p id="offline"></p>
-+  <footer>
-+    <span id="wifi"></span>
-+    <span><a href="/setup">Wi-Fi settings</a> · <a href="/firmware">Firmware</a> · <a href="/settings.html">Advanced</a></span>
-+  </footer>
-+</main>
-+<script>
-+(function () {
-+  "use strict";
-+  var $ = function (id) { return document.getElementById(id); };
-+  var STATION = "The Mighty KevFM";
-+  var vol = $("volume"), dragging = false, volTimer = null, pending = {}, lastSent = 0;
-+  var sleepLeft = 0, sleepAt = 0;
-+
-+  function post(data) {
-+    lastSent = Date.now();
-+    return fetch("/kevfm/set", { method: "POST", body: new URLSearchParams(data) }).catch(function () {});
-+  }
-+  function pct(v) { return Math.round(v / 254 * 100); }
-+  function paintVol() {
-+    var p = vol.value / 254 * 100;
-+    vol.style.background = "linear-gradient(to right, var(--accent) " + p + "%, var(--line) " + p + "%)";
-+    $("volnum").textContent = "Volume " + pct(vol.value) + "%";
-+  }
-+  function sendVol() { clearTimeout(volTimer); volTimer = setTimeout(function () { post({ volume: vol.value }); }, 120); }
-+  vol.addEventListener("input", function () { dragging = true; paintVol(); sendVol(); });
-+  vol.addEventListener("change", function () { dragging = false; });
-+  function step(d) { vol.value = Math.max(0, Math.min(254, +vol.value + d)); paintVol(); sendVol(); }
-+  $("down").addEventListener("click", function () { step(-6); });
-+  $("up").addEventListener("click", function () { step(6); });
-+
-+  function mark(groupId, value) {
-+    Array.prototype.forEach.call($(groupId).querySelectorAll(".chip"), function (c) { c.classList.toggle("on", +c.dataset.v === value); });
-+  }
-+  function chips(groupId, key) {
-+    $(groupId).addEventListener("click", function (e) {
-+      var c = e.target.closest ? e.target.closest(".chip") : null;
-+      if (!c) return;
-+      var v = +c.dataset.v, d = {}; d[key] = v;
-+      mark(groupId, v); pending[key] = Date.now();
-+      if (key === "sleep") { sleepLeft = v * 60; sleepAt = Date.now(); showSleep(); }
-+      post(d);
-+    });
-+  }
-+  chips("sleep", "sleep"); chips("light", "light");
-+
-+  function clock(s) { var m = Math.floor(s / 60), r = s % 60; return m + ":" + (r < 10 ? "0" : "") + r; }
-+  function showSleep() {
-+    var left = sleepLeft - Math.floor((Date.now() - sleepAt) / 1000);
-+    $("sleeplabel").textContent = sleepLeft > 0 && left > 0 ? "Radio sleeps in " + clock(left) : "Sleep timer";
-+  }
-+  setInterval(showSleep, 1000);
-+
-+  function split(t) {
-+    t = String(t || "").trim();
-+    var at = t.indexOf(" - ");
-+    if (at > 0) return { title: t.slice(at + 3).trim(), artist: t.slice(0, at).trim() };
-+    return { title: STATION, artist: "Live radio" };
-+  }
-+  function fresh(key) { return pending[key] && Date.now() - pending[key] < 3000; }
-+
-+  function poll() {
-+    fetch("/kevfm/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) {
-+      $("offline").textContent = "";
-+      var connecting = !st.title || st.title.charAt(0) === "[";
-+      var s = connecting ? { title: STATION, artist: "Live radio" } : split(st.title);
-+      $("title").textContent = s.title;
-+      $("artist").textContent = s.artist;
-+      document.title = s.title === STATION ? STATION : s.title + " - " + s.artist;
-+      var live = st.playing && !connecting;
-+      $("onair").textContent = live ? "On air" : "Connecting…";
-+      $("onair").classList.toggle("live", live);
-+      if (!dragging && Date.now() - lastSent > 2500) { vol.value = st.volume; paintVol(); }
-+      if (!fresh("sleep")) { mark("sleep", st.sleep); sleepLeft = st.left; sleepAt = Date.now(); showSleep(); }
-+      if (!fresh("light")) mark("light", st.light);
-+      $("wifi").textContent = st.ssid ? "Wi-Fi: " + st.ssid + (st.rssi ? " (" + (st.rssi >= -60 ? "strong" : st.rssi >= -72 ? "good" : "weak") + " signal)" : "") : "";
-+    }).catch(function () {
-+      $("offline").textContent = "Can't reach the radio. Is it on, and is this phone on the same Wi-Fi?";
-+    }).then(function () { setTimeout(poll, 2000); });
-+  }
-+  paintVol();
-+  poll();
-+})();
-+</script>
-+</body>
-+</html>
-diff -ruN -x build upstream_yoradio/yoRadio/data/www/setup.html yoRadio/data/www/setup.html
---- upstream_yoradio/yoRadio/data/www/setup.html	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/data/www/setup.html	2026-10-25 18:01:32.986979000 -0400
-@@ -0,0 +1,213 @@
-+<!doctype html>
-+<html lang="en">
-+<head>
-+<meta charset="utf-8">
-+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-+<meta name="theme-color" content="#0b0f14">
-+<title>KevFM Radio Wi-Fi</title>
-+<style>
-+  :root { color-scheme: dark; --bg: #0b0f14; --card: #131a22; --line: #2a3542; --ink: #eef2f6; --muted: #8b98a7; --accent: #f2a33a; --bad: #ff7a6b; }
-+  * { box-sizing: border-box; }
-+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif; }
-+  main { max-width: 460px; margin: 0 auto; padding: 22px 16px calc(28px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 16px; }
-+  header { display: flex; align-items: center; gap: 14px; }
-+  header img { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; background: #000; }
-+  h1 { margin: 0; font-size: 1.25rem; }
-+  .sub { margin: 2px 0 0; color: var(--muted); font-size: .9rem; }
-+  h2 { margin: 6px 0 0; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); display: flex; justify-content: space-between; align-items: center; }
-+  .card { background: var(--card); border-radius: 16px; overflow: hidden; }
-+  .net { border-bottom: 1px solid var(--line); }
-+  .net:last-child { border-bottom: 0; }
-+  .row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 16px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-+  .row .name { flex: 1; overflow-wrap: anywhere; }
-+  .tag { font-size: .75rem; color: var(--muted); }
-+  .bars { display: flex; align-items: flex-end; gap: 2px; height: 16px; }
-+  .bars i { width: 4px; background: var(--line); border-radius: 1px; }
-+  .bars i.on { background: var(--ink); }
-+  .lock { width: 14px; height: 14px; fill: var(--muted); }
-+  .form { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 10px; }
-+  label { font-size: .85rem; color: var(--muted); }
-+  input[type=text], input[type=password] { width: 100%; padding: 13px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; font-size: 16px; }
-+  input:focus { outline: 2px solid var(--accent); border-color: transparent; }
-+  .show { display: flex; align-items: center; gap: 8px; font-size: .9rem; color: var(--muted); }
-+  .btn { padding: 13px 16px; border-radius: 999px; border: 0; background: var(--accent); color: #1a1205; font: inherit; font-weight: 650; cursor: pointer; }
-+  .btn:disabled { opacity: .5; }
-+  .link { background: none; border: 0; color: var(--accent); font: inherit; font-size: .9rem; padding: 6px 0; cursor: pointer; }
-+  .muted { color: var(--muted); font-size: .9rem; }
-+  .err { color: var(--bad); font-size: .9rem; min-height: 1.2em; margin: 0; }
-+  .empty { padding: 16px; color: var(--muted); }
-+  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s 0.8s linear infinite; vertical-align: -2px; margin-right: 6px; }
-+  @keyframes s { to { transform: rotate(360deg); } }
-+  .done { text-align: center; padding: 28px 18px; }
-+  .done h2 { justify-content: center; font-size: 1rem; margin-bottom: 10px; }
-+  .hidden { display: none !important; }
-+  .saved .row { cursor: default; }
-+  footer { text-align: center; }
-+  footer a { color: var(--muted); font-size: .85rem; }
-+</style>
-+</head>
-+<body>
-+<main id="main">
-+  <header>
-+    <img src="kevfm-cover-256.jpg" alt="">
-+    <div>
-+      <h1>Your KevFM radio</h1>
-+      <p class="sub" id="sub">Let's get it on your Wi-Fi.</p>
-+    </div>
-+  </header>
-+
-+  <section id="pick">
-+    <h2><span>Choose your Wi-Fi</span><button class="link" id="refresh" type="button">Refresh</button></h2>
-+    <div class="card" id="list"><div class="empty"><span class="spin"></span>Looking for networks…</div></div>
-+    <p><button class="link" id="manualbtn" type="button">My network isn't listed: type its name</button></p>
-+    <div class="card hidden" id="manual">
-+      <div class="form" style="padding-top:16px">
-+        <label for="mssid">Network name</label>
-+        <input type="text" id="mssid" maxlength="29" autocapitalize="off" autocorrect="off" spellcheck="false">
-+        <label for="mpass">Password</label>
-+        <input type="password" id="mpass" maxlength="39" autocapitalize="off" autocorrect="off" spellcheck="false">
-+        <label class="show"><input type="checkbox" data-for="mpass"> Show password</label>
-+        <p class="err" id="merr"></p>
-+        <button class="btn" type="button" id="msave">Connect</button>
-+      </div>
-+    </div>
-+  </section>
-+
-+  <section id="savedwrap" class="hidden">
-+    <h2><span>Saved networks</span></h2>
-+    <div class="card saved" id="saved"></div>
-+    <p class="muted">The radio tries these in order and remembers up to <span id="max">5</span>.</p>
-+  </section>
-+
-+  <section id="done" class="card done hidden">
-+    <h2>Saved</h2>
-+    <p id="donetext"></p>
-+    <p class="muted">If it can't join, the <b>KevFM-Radio</b> Wi-Fi comes back in about a minute so you can try again.</p>
-+  </section>
-+
-+  <footer id="back" class="hidden"><a href="/">Back to the radio</a></footer>
-+</main>
-+<script>
-+(function () {
-+  "use strict";
-+  var $ = function (id) { return document.getElementById(id); };
-+  var connected = false, open = null, savedNames = [];
-+
-+  function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
-+  function bars(rssi) {
-+    var n = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1, h = "";
-+    for (var i = 1; i <= 4; i++) h += '<i class="' + (i <= n ? "on" : "") + '" style="height:' + (i * 4) + 'px"></i>';
-+    return '<span class="bars" aria-label="signal ' + n + ' of 4">' + h + "</span>";
-+  }
-+  var LOCK = '<svg class="lock" viewBox="0 0 24 24" aria-label="needs a password"><path d="M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V11a1 1 0 0 1 1-1zm2 0h6V7a3 3 0 0 0-6 0z"/></svg>';
-+
-+  function post(url, data) {
-+    var body = new URLSearchParams(data);
-+    return fetch(url, { method: "POST", body: body }).then(function (r) {
-+      return r.json().catch(function () { return { ok: r.ok }; });
-+    });
-+  }
-+
-+  function check(ssid, pass, needPass) {
-+    if (!ssid) return "Enter the network name.";
-+    if (ssid.length > 29) return "The radio can only use network names up to 29 characters.";
-+    if (needPass && !pass) return "Enter the Wi-Fi password.";
-+    if (pass && pass.length < 8) return "Wi-Fi passwords are at least 8 characters.";
-+    if (pass.length > 39) return "The radio can only use passwords up to 39 characters.";
-+    return "";
-+  }
-+
-+  function save(ssid, pass, errEl, btn) {
-+    var problem = check(ssid, pass, false);
-+    if (problem) { errEl.textContent = problem; return; }
-+    errEl.textContent = ""; btn.disabled = true; btn.textContent = "Saving…";
-+    post("/kevfm/wifi", { ssid: ssid, pass: pass }).then(function (res) {
-+      if (!res.ok) { errEl.textContent = res.error || "Couldn't save. Try again."; btn.disabled = false; btn.textContent = "Connect"; return; }
-+      $("pick").classList.add("hidden"); $("savedwrap").classList.add("hidden"); $("back").classList.add("hidden");
-+      $("donetext").innerHTML = "The radio is restarting to join <b>" + esc(ssid) + "</b>. " +
-+        (connected ? "Give it about 20 seconds and KevFM starts playing."
-+                   : "Put your phone back on <b>" + esc(ssid) + "</b> too. In about 20 seconds KevFM starts playing.");
-+      $("done").classList.remove("hidden");
-+    }).catch(function () { errEl.textContent = "The radio didn't answer. Are you still on its Wi-Fi?"; btn.disabled = false; btn.textContent = "Connect"; });
-+  }
-+
-+  function toggleShow(e) {
-+    var box = e.target; if (box.type !== "checkbox" || !box.dataset.for) return;
-+    $(box.dataset.for).type = box.checked ? "text" : "password";
-+  }
-+  document.addEventListener("change", toggleShow);
-+
-+  function render(nets) {
-+    var list = $("list");
-+    if (!nets.length) { list.innerHTML = '<div class="empty">No networks found yet.</div>'; return; }
-+    list.innerHTML = "";
-+    nets.forEach(function (n, i) {
-+      var div = document.createElement("div"); div.className = "net";
-+      var isSaved = savedNames.indexOf(n.ssid) >= 0;
-+      div.innerHTML = '<button class="row" type="button">' + bars(n.rssi) + '<span class="name">' + esc(n.ssid) +
-+        (isSaved ? ' <span class="tag">saved</span>' : "") + "</span>" + (n.open ? '<span class="tag">open</span>' : LOCK) + "</button>" +
-+        '<div class="form hidden">' +
-+        (n.open ? '<p class="muted">Open network, no password.</p>'
-+                : '<label for="p' + i + '">Password for ' + esc(n.ssid) + '</label><input type="password" id="p' + i + '" maxlength="39" autocapitalize="off" autocorrect="off" spellcheck="false">' +
-+                  '<label class="show"><input type="checkbox" data-for="p' + i + '"> Show password</label>') +
-+        '<p class="err"></p><button class="btn" type="button">Connect</button></div>';
-+      var form = div.querySelector(".form"), err = div.querySelector(".err"), btn = div.querySelector(".btn"), pw = div.querySelector("input[type=password]");
-+      div.querySelector(".row").addEventListener("click", function () {
-+        if (open && open !== form) open.classList.add("hidden");
-+        form.classList.toggle("hidden"); open = form;
-+        if (pw && !form.classList.contains("hidden")) pw.focus();
-+      });
-+      btn.addEventListener("click", function () {
-+        var pass = pw ? pw.value : "";
-+        if (!n.open && !pass) { err.textContent = "Enter the Wi-Fi password."; return; }
-+        save(n.ssid, pass, err, btn);
-+      });
-+      if (pw) pw.addEventListener("keydown", function (e) { if (e.key === "Enter") btn.click(); });
-+      list.appendChild(div);
-+    });
-+  }
-+
-+  var scanTries = 0;
-+  function scan(refresh) {
-+    if (refresh) { $("list").innerHTML = '<div class="empty"><span class="spin"></span>Looking for networks…</div>'; scanTries = 0; }
-+    fetch("/kevfm/scan" + (refresh ? "?refresh=1" : ""), { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (res) {
-+      if (res.networks.length && !refresh) render(res.networks);
-+      if (res.scanning && scanTries++ < 15) { setTimeout(function () { scan(false); }, 1500); return; }
-+      if (!res.scanning) render(res.networks);
-+    }).catch(function () { if (scanTries++ < 15) setTimeout(function () { scan(false); }, 2000); });
-+  }
-+
-+  function loadSaved() {
-+    return fetch("/kevfm/networks", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (res) {
-+      savedNames = res.saved; $("max").textContent = res.max;
-+      var box = $("saved"); box.innerHTML = "";
-+      $("savedwrap").classList.toggle("hidden", !res.saved.length);
-+      res.saved.forEach(function (name, i) {
-+        var div = document.createElement("div"); div.className = "net";
-+        div.innerHTML = '<div class="row"><span class="name">' + (i + 1) + ". " + esc(name) + '</span><button class="link" type="button">Forget</button></div>';
-+        div.querySelector("button").addEventListener("click", function () {
-+          if (!confirm("Forget " + name + "?")) return;
-+          post("/kevfm/forget", { ssid: name }).then(loadSaved);
-+        });
-+        box.appendChild(div);
-+      });
-+    }).catch(function () {});
-+  }
-+
-+  $("refresh").addEventListener("click", function () { scan(true); });
-+  $("manualbtn").addEventListener("click", function () { $("manual").classList.toggle("hidden"); $("mssid").focus(); });
-+  $("msave").addEventListener("click", function () { save($("mssid").value.trim(), $("mpass").value, $("merr"), $("msave")); });
-+  $("mpass").addEventListener("keydown", function (e) { if (e.key === "Enter") $("msave").click(); });
-+
-+  fetch("/kevfm/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) {
-+    connected = st.mode === "connected";
-+    if (connected) {
-+      $("sub").textContent = "Connected to " + st.ssid + ". Add another network for when it moves.";
-+      $("back").classList.remove("hidden");
-+    }
-+  }).catch(function () {});
-+  loadSaved().then(function () { scan(false); });
-+})();
-+</script>
-+</body>
-+</html>
-diff -ruN -x build upstream_yoradio/yoRadio/data/www/theme.css yoRadio/data/www/theme.css
+diff -ruN -x build -x partitions.csv upstream_yoradio/yoRadio/data/www/theme.css yoRadio/data/www/theme.css
 --- upstream_yoradio/yoRadio/data/www/theme.css	2026-10-25 10:45:04.207844200 -0400
 +++ yoRadio/data/www/theme.css	2026-10-25 10:53:01.719046200 -0400
 @@ -15,3 +15,7 @@
@@ -568,7 +10,7 @@ diff -ruN -x build upstream_yoradio/yoRadio/data/www/theme.css yoRadio/data/www/
 +/* KevFM radio: one station only. Hide the station list, playlist editor and prev/next.
 +   (The radio also rewrites its station list to KevFM at every boot.) */
 +#toggleplaylist, #prevbutton, #nextbutton, #playlist, #pleditorwrap { display: none !important; }
-diff -ruN -x build upstream_yoradio/yoRadio/myoptions.h yoRadio/myoptions.h
+diff -ruN -x build -x partitions.csv upstream_yoradio/yoRadio/myoptions.h yoRadio/myoptions.h
 --- upstream_yoradio/yoRadio/myoptions.h	1969-12-31 19:00:00.000000000 -0500
 +++ yoRadio/myoptions.h	2026-10-25 18:38:58.105616900 -0400
 @@ -0,0 +1,53 @@
@@ -625,7 +67,7 @@ diff -ruN -x build upstream_yoradio/yoRadio/myoptions.h yoRadio/myoptions.h
 +#define apPassword        "kevfmradio"
 +
 +#endif
-diff -ruN -x build upstream_yoradio/yoRadio/src/core/controls.cpp yoRadio/src/core/controls.cpp
+diff -ruN -x build -x partitions.csv upstream_yoradio/yoRadio/src/core/controls.cpp yoRadio/src/core/controls.cpp
 --- upstream_yoradio/yoRadio/src/core/controls.cpp	2026-10-25 10:45:04.348367400 -0400
 +++ yoRadio/src/core/controls.cpp	2026-10-25 10:52:45.583563900 -0400
 @@ -170,8 +170,11 @@
@@ -673,7 +115,7 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/core/controls.cpp yoRadio/src/co
    if (display.mode() == SCREENSAVER || display.mode() == SCREENBLANK) {
      display.putRequest(NEWMODE, PLAYER);
      return;
-diff -ruN -x build upstream_yoradio/yoRadio/src/core/controls.h yoRadio/src/core/controls.h
+diff -ruN -x build -x partitions.csv upstream_yoradio/yoRadio/src/core/controls.h yoRadio/src/core/controls.h
 --- upstream_yoradio/yoRadio/src/core/controls.h	2026-10-25 10:45:04.348938100 -0400
 +++ yoRadio/src/core/controls.h	2026-10-25 10:52:45.582556100 -0400
 @@ -33,4 +33,12 @@
@@ -689,7 +131,7 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/core/controls.h yoRadio/src/core
 +/* ==== KevFM patch end ==== */
 +
  #endif
-diff -ruN -x build upstream_yoradio/yoRadio/src/core/netserver.cpp yoRadio/src/core/netserver.cpp
+diff -ruN -x build -x partitions.csv upstream_yoradio/yoRadio/src/core/netserver.cpp yoRadio/src/core/netserver.cpp
 --- upstream_yoradio/yoRadio/src/core/netserver.cpp	2026-10-25 10:45:04.351307500 -0400
 +++ yoRadio/src/core/netserver.cpp	2026-10-25 17:50:06.764737800 -0400
 @@ -49,6 +49,7 @@
@@ -709,10 +151,10 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/core/netserver.cpp yoRadio/src/c
    webserver.on("/", HTTP_ANY, handleIndex);
    webserver.onNotFound(handleNotFound);
    webserver.onFileUpload(handleUpload);
-diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.cpp yoRadio/src/plugins/KevFM/kevfm.cpp
+diff -ruN -x build -x partitions.csv upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.cpp yoRadio/src/plugins/KevFM/kevfm.cpp
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.cpp	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm.cpp	2026-10-25 20:58:07.075027200 -0400
-@@ -0,0 +1,401 @@
++++ yoRadio/src/plugins/KevFM/kevfm.cpp	2026-10-25 22:40:44.686332700 -0400
+@@ -0,0 +1,408 @@
 +/*
 + * KevFM gift radio plugin for yoRadio. See kevfm.h and README.md.
 + */
@@ -850,15 +292,22 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.cpp yoRadio/
 +
 +/* 1 Hz, main loop (TimeKeeper::loop1) */
 +void KevFM::on_ticker() {
-+  /* keep playing: if the stream dropped (server restart, network blip), start it again */
++  /* keep playing: if the stream dropped (server restart, network blip), start it again.
++     The wait doubles after each failed try (15 s, 30 s, 1 min, 2 min max) so a station that
++     is off the air for hours isn't hammered; a minute of playing resets it. */
++  static uint16_t replayWait = KEVFM_REPLAY_SECS;
++  static uint16_t playingSecs = 0;
 +  if (network.status == CONNECTED && !_fading && !kevfmOtaBusy() && player.status() == STOPPED) {
-+    if (++_stoppedSecs >= KEVFM_REPLAY_SECS) {
++    playingSecs = 0;
++    if (++_stoppedSecs >= replayWait) {
 +      _stoppedSecs = 0;
-+      Serial.println("##[KevFM]#\tstream stopped, playing again");
++      Serial.printf("##[KevFM]#\tstream stopped, playing again (next wait %u s)\n", replayWait < 60 ? replayWait * 2 : 120);
++      replayWait = replayWait < 60 ? replayWait * 2 : 120;
 +      player.sendCommand({PR_PLAY, 1});
 +    }
 +  } else {
 +    _stoppedSecs = 0;
++    if (player.status() == PLAYING && ++playingSecs >= 60) replayWait = KEVFM_REPLAY_SECS;
 +  }
 +  /* the sleep timer must still put the radio to sleep if yoRadio has paused loopControls
 +     (e.g. while the network is lost) */
@@ -1114,7 +563,7 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.cpp yoRadio/
 +  float g = _level * _level * KEVFM_LED_MAX;          /* rough gamma so fades look even */
 +  ledcWrite(KEVFM_PIN_LED, (uint32_t)(g * ((1 << KEVFM_LED_BITS) - 1)));
 +}
-diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.h yoRadio/src/plugins/KevFM/kevfm.h
+diff -ruN -x build -x partitions.csv upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.h yoRadio/src/plugins/KevFM/kevfm.h
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.h	1969-12-31 19:00:00.000000000 -0500
 +++ yoRadio/src/plugins/KevFM/kevfm.h	2026-10-25 17:50:55.405758000 -0400
 @@ -0,0 +1,111 @@
@@ -1229,10 +678,10 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.h yoRadio/sr
 +void kevfmWebLoop();     /* captive DNS + first Wi-Fi scan while in hotspot mode */
 +
 +#endif
-diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.cpp yoRadio/src/plugins/KevFM/kevfm_ota.cpp
+diff -ruN -x build -x partitions.csv upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.cpp yoRadio/src/plugins/KevFM/kevfm_ota.cpp
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.cpp	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm_ota.cpp	2026-10-25 20:57:33.958054200 -0400
-@@ -0,0 +1,408 @@
++++ yoRadio/src/plugins/KevFM/kevfm_ota.cpp	2026-10-25 22:22:54.225402300 -0400
+@@ -0,0 +1,416 @@
 +/*
 + * KevFM radio firmware updates, the same way as the Bubs stock ticker: nothing happens
 + * unless someone presses a button on the radio's Firmware page.
@@ -1264,6 +713,7 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.cpp yoRa
 +#include <HTTPClient.h>
 +#include <Update.h>
 +#include <SPIFFS.h>
++#include <errno.h>
 +
 +enum otaState_e : uint8_t { OTA_IDLE, OTA_CHECKING, OTA_CHECKED, OTA_INSTALLING, OTA_DONE, OTA_FAILED };
 +static const char *const kStateName[] = {"idle", "checking", "checked", "installing", "done", "failed"};
@@ -1465,7 +915,13 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.cpp yoRa
 +    int n = stream->readBytes((char *)buf, avail > sizeof(buf) ? sizeof(buf) : avail);
 +    if (n <= 0) { setMsg(OTA_FAILED, "The %s download stopped.", what); failed = true; break; }
 +    size_t w = toFlash ? Update.write(buf, n) : f.write(buf, n);
-+    if (w != (size_t)n) { setMsg(OTA_FAILED, "Writing the %s failed%s.", what, toFlash ? "" : " (radio storage full?)"); failed = true; break; }
++    if (w != (size_t)n) {
++      if (toFlash) setMsg(OTA_FAILED, "Writing the firmware failed (error %u).", Update.getError());
++      else setMsg(OTA_FAILED, "Saving %s failed after %u of %d bytes (wrote %u of %d; storage %u of %u bytes used, errno %d).",
++                  what, (unsigned)written, len, (unsigned)w, n, (unsigned)SPIFFS.usedBytes(), (unsigned)SPIFFS.totalBytes(), errno);
++      failed = true;
++      break;
++    }
 +    written += w;
 +    lastData = millis();
 +    if (toFlash && len > 0) {
@@ -1500,7 +956,8 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.cpp yoRa
 +  otaProgress = 0;
 +  setMsg(OTA_INSTALLING, "Stopping the music for the update...");
 +  stopStream();
-+  Serial.printf("##[KevFM]#\tupdate install: largest free block %u bytes\n", ESP.getMaxAllocHeap());
++  Serial.printf("##[KevFM]#\tupdate install: largest free block %u bytes, storage %u of %u bytes used\n",
++                ESP.getMaxAllocHeap(), (unsigned)SPIFFS.usedBytes(), (unsigned)SPIFFS.totalBytes());
 +
 +  /* web files first, to temporary names; they replace the old ones only if the firmware
 +     installs too, so pages and firmware stay matched */
@@ -1641,7 +1098,7 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.cpp yoRa
 +  server.on("/kevfm/update/install", HTTP_POST, onInstall);
 +  server.on("/kevfm/update/upload", HTTP_POST, onUploadDone, onUploadData);
 +}
-diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.h yoRadio/src/plugins/KevFM/kevfm_ota.h
+diff -ruN -x build -x partitions.csv upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.h yoRadio/src/plugins/KevFM/kevfm_ota.h
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.h	1969-12-31 19:00:00.000000000 -0500
 +++ yoRadio/src/plugins/KevFM/kevfm_ota.h	2026-10-25 20:57:34.029499500 -0400
 @@ -0,0 +1,11 @@
@@ -1656,7 +1113,560 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.h yoRadi
 +bool kevfmOtaBusy();     /* checking, installing, receiving an upload, or about to restart */
 +
 +#endif
-diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_station.h yoRadio/src/plugins/KevFM/kevfm_station.h
+diff -ruN -x build -x partitions.csv upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_pages.h yoRadio/src/plugins/KevFM/kevfm_pages.h
+--- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_pages.h	1969-12-31 19:00:00.000000000 -0500
++++ yoRadio/src/plugins/KevFM/kevfm_pages.h	2026-10-25 22:28:32.553926100 -0400
+@@ -0,0 +1,549 @@
++/* GENERATED by tools/embed_web.py from web/*.html - edit those, then rebuild. */
++#ifndef KEVFM_PAGES_H
++#define KEVFM_PAGES_H
++#include <Arduino.h>
++
++/* kevfm.html: 9259 bytes, gzipped 3304 */
++static const uint8_t kevfm_page_kevfm_html[] PROGMEM = {
++  31,139,8,0,0,0,0,0,2,255,181,90,221,146,219,182,21,190,247,83,
++  192,116,146,82,89,145,43,105,119,229,181,254,28,199,77,102,60,181,235,52,
++  235,52,23,153,92,64,36,40,193,75,17,44,9,73,171,56,59,211,167,233,
++  43,244,190,143,210,39,233,119,0,254,74,90,123,55,158,122,118,36,18,56,
++  56,56,191,223,57,128,60,121,28,170,64,239,82,193,150,122,21,207,30,77,
++  232,139,197,60,89,76,29,145,56,52,32,120,136,175,149,208,156,5,75,158,
++  229,66,79,157,181,142,188,75,167,28,78,248,74,76,157,141,20,219,84,101,
++  218,97,129,74,180,72,64,182,149,161,94,78,67,177,145,129,240,204,75,151,
++  201,68,106,201,99,47,15,120,44,166,253,46,43,215,121,145,212,211,64,109,
++  68,182,199,88,47,197,74,120,129,138,85,214,224,253,164,55,239,69,253,243,
++  61,90,158,166,177,240,86,106,46,241,181,21,115,15,3,94,192,83,62,143,
++  69,99,241,78,228,247,89,152,107,174,215,185,55,231,25,30,119,45,14,243,
++  152,7,215,158,206,120,146,199,235,0,67,247,225,167,165,110,49,249,139,216,
++  124,255,134,253,200,67,169,104,185,153,158,189,91,10,246,70,46,150,122,199,
++  204,252,228,212,142,63,154,24,25,102,143,24,27,101,74,105,246,129,25,155,
++  192,146,100,160,17,11,121,118,61,102,158,55,95,140,88,97,29,122,13,120,
++  22,98,160,127,214,231,131,1,13,196,50,1,245,147,1,63,187,56,55,3,
++  50,185,198,187,16,209,32,26,210,251,106,173,5,45,185,156,63,187,228,79,
++  105,132,7,164,34,134,34,172,58,227,99,118,11,41,190,134,4,115,117,227,
++  229,242,55,153,96,207,185,202,66,145,121,24,178,243,20,74,93,140,134,59,
++  16,174,120,182,144,201,136,245,198,108,37,19,111,41,72,195,17,235,247,122,
++  95,142,217,28,182,92,100,106,157,96,215,13,207,92,210,161,51,182,234,149,
++  35,16,18,67,145,34,49,250,195,244,230,180,239,159,51,207,154,57,223,229,
++  90,172,186,204,185,18,11,37,216,79,175,156,46,251,81,205,149,86,93,150,
++  195,67,94,46,50,25,89,169,86,92,38,36,79,91,136,205,114,204,66,153,
++  167,49,223,141,88,20,11,168,64,159,94,40,51,17,104,169,32,57,164,89,
++  175,146,49,227,177,92,36,158,196,134,57,6,97,22,145,141,217,251,117,174,
++  101,180,243,10,215,214,19,11,158,98,131,203,20,12,83,30,134,198,80,131,
++  243,244,198,232,192,144,3,129,107,94,79,152,72,54,110,206,35,225,241,76,
++  112,168,139,68,131,45,181,86,171,14,20,215,226,70,123,102,235,154,55,169,
++  243,36,86,11,5,125,76,118,141,72,45,119,120,190,217,118,217,96,216,75,
++  111,176,144,231,41,52,240,50,14,45,32,9,59,101,253,113,233,170,12,145,
++  183,134,22,253,115,146,79,205,223,19,37,210,144,148,221,208,14,77,199,60,
++  233,245,122,99,235,240,37,15,213,22,190,100,164,131,17,63,91,204,185,219,
++  235,50,251,231,95,92,116,172,120,62,69,95,45,158,117,247,138,223,120,197,
++  192,249,160,71,91,31,6,0,173,235,28,10,122,196,144,150,131,177,133,73,
++  20,236,70,81,66,97,137,48,239,251,23,153,88,217,192,65,30,90,135,15,
++  47,40,12,203,136,180,122,64,127,168,28,197,106,235,109,51,114,26,79,118,
++  219,165,200,68,193,155,103,90,230,186,29,201,173,0,53,89,83,132,104,181,
++  121,207,238,254,113,214,42,225,50,107,112,38,119,144,88,45,94,254,165,225,
++  20,11,13,223,123,121,202,3,99,2,191,63,160,97,19,30,6,141,34,149,
++  173,70,108,157,166,34,11,120,46,238,16,178,222,215,143,229,70,148,88,82,
++  146,217,124,63,164,27,141,230,2,27,88,250,34,210,29,167,145,58,50,33,
++  116,241,230,177,10,128,69,133,147,141,211,202,100,51,47,123,110,189,56,14,
++  2,149,20,214,48,94,102,57,60,37,14,48,168,150,72,159,50,39,250,52,
++  200,19,185,226,54,91,211,117,156,11,54,200,153,128,17,144,77,158,90,107,
++  72,23,81,249,41,236,254,205,181,216,69,25,208,58,47,168,63,144,32,248,
++  84,100,92,13,109,252,51,80,218,56,222,168,24,51,123,16,113,20,10,108,
++  198,15,72,158,66,110,173,48,50,24,148,97,234,27,37,41,76,193,100,196,
++  18,149,136,202,84,231,231,77,91,217,183,163,198,50,99,70,109,150,171,88,
++  134,133,201,200,250,157,135,0,106,176,206,114,26,75,149,180,226,223,71,197,
++  59,209,174,202,204,94,75,213,124,179,168,49,192,26,162,84,209,190,69,50,
++  142,75,75,228,58,83,215,8,120,72,150,129,237,75,146,185,28,45,97,99,
++  80,13,144,194,1,89,220,236,212,220,117,196,1,220,38,180,27,121,97,186,
++  14,215,127,118,94,196,182,76,210,181,254,133,26,160,41,136,22,226,215,202,
++  45,64,73,170,219,215,82,83,145,17,28,211,129,40,101,60,28,249,88,120,
++  159,31,135,184,194,87,8,76,91,145,45,163,163,82,141,70,165,44,57,124,
++  13,214,122,185,94,205,33,235,221,34,150,150,26,182,172,61,252,3,217,87,
++  198,90,239,110,225,86,234,55,207,188,84,130,253,223,182,127,130,76,76,214,
++  171,6,92,94,150,104,249,41,56,246,47,27,181,0,84,146,227,27,188,208,
++  28,4,35,166,249,124,29,163,211,195,64,94,196,17,73,148,30,166,253,131,
++  58,3,3,7,151,85,238,199,124,46,226,125,184,253,136,172,173,62,197,31,
++  60,72,252,96,41,211,252,80,124,35,145,241,132,81,196,150,36,250,252,72,
++  98,87,252,192,174,74,242,103,212,198,12,142,184,244,217,179,103,245,232,3,
++  64,170,40,250,119,246,125,50,65,213,148,250,168,161,182,75,24,222,212,69,
++  147,2,86,159,3,116,171,244,240,21,117,129,159,12,59,239,120,89,44,70,
++  159,244,121,127,208,187,56,214,93,208,70,17,186,116,145,221,203,217,70,133,
++  123,134,89,237,191,198,38,252,174,109,108,5,143,34,50,122,77,243,36,138,
++  158,242,225,188,45,197,179,187,34,174,209,242,220,62,154,156,22,231,144,201,
++  105,113,54,164,22,159,78,63,232,172,233,116,50,145,171,5,147,225,212,161,
++  214,212,97,121,22,76,157,107,177,137,86,158,233,42,189,193,197,208,127,159,
++  46,28,228,11,206,64,251,199,29,199,66,199,212,65,3,235,20,200,97,95,
++  12,239,80,110,88,16,243,60,159,58,20,45,102,16,195,169,217,208,158,175,
++  142,156,160,210,22,153,109,229,156,217,107,42,15,20,179,106,159,194,116,60,
++  206,236,165,74,18,178,126,178,248,239,63,255,85,211,52,100,0,24,21,34,
++  96,124,190,70,183,158,148,83,38,172,28,195,14,221,114,226,48,3,153,142,
++  37,130,242,200,95,207,160,193,212,249,219,90,10,77,231,222,9,85,74,58,
++  16,127,171,110,166,14,117,166,131,115,252,97,34,229,122,201,192,234,205,16,
++  41,183,236,15,156,211,25,28,177,89,224,211,114,172,164,48,248,92,108,102,
++  48,217,202,176,161,232,193,51,220,11,206,14,53,225,48,235,197,57,28,164,
++  69,58,117,250,14,2,39,94,11,51,217,20,238,239,118,225,167,181,92,167,
++  31,211,241,181,90,135,15,83,241,77,127,192,134,155,59,85,157,156,194,15,
++  45,175,217,202,224,204,172,196,133,191,10,178,189,216,49,200,238,160,105,136,
++  69,245,210,148,246,42,22,34,101,90,174,204,109,196,190,215,13,145,85,58,
++  39,66,251,62,107,44,106,10,215,12,89,66,228,198,194,3,171,182,237,215,
++  88,229,224,120,175,185,183,33,247,204,222,70,209,129,219,239,207,160,15,14,
++  253,30,5,194,231,48,185,0,147,139,207,100,114,6,73,206,62,87,18,66,
++  134,225,17,38,149,11,254,88,4,152,91,25,22,19,140,220,25,1,64,16,
++  76,51,146,115,89,33,201,167,28,223,100,249,80,199,255,188,20,32,85,235,
++  96,41,194,207,113,158,51,123,17,111,249,46,135,232,159,193,102,112,36,18,
++  143,89,189,192,84,91,131,144,232,69,98,218,202,85,44,67,225,78,12,217,
++  86,70,146,104,104,160,49,55,155,112,182,204,68,52,117,78,115,161,225,172,
++  217,207,210,251,94,50,188,16,62,231,147,83,62,99,255,249,55,171,201,34,
++  153,173,182,60,195,134,223,23,79,135,52,229,106,159,238,170,96,148,112,67,
++  45,116,72,132,181,4,147,211,82,210,201,169,173,113,147,60,200,100,170,103,
++  143,220,104,157,152,234,204,220,14,251,0,90,103,141,115,36,142,38,50,208,
++  206,24,239,168,197,236,11,54,101,53,157,12,65,201,50,232,144,37,44,84,
++  1,144,42,209,254,66,232,239,98,65,143,223,238,94,133,68,132,82,91,50,
++  184,122,247,226,221,171,183,127,5,155,195,106,89,210,208,249,116,202,190,112,
++  75,156,239,116,89,152,241,5,202,246,130,182,231,56,223,118,137,232,29,161,
++  19,70,146,117,28,119,89,42,146,208,82,124,184,237,50,248,88,95,65,4,
++  188,246,74,190,6,166,94,139,200,12,118,237,235,139,130,130,186,143,82,175,
++  84,229,218,165,192,176,118,96,77,102,127,230,90,248,104,201,220,206,216,76,
++  21,202,71,66,7,75,215,57,53,189,1,185,194,233,82,87,47,244,82,161,
++  29,115,126,120,123,245,206,177,247,135,104,232,196,150,253,244,227,235,43,28,
++  114,130,229,15,56,233,172,242,98,183,219,142,31,112,98,212,114,197,173,217,
++  234,182,37,97,160,221,77,195,246,111,80,110,236,73,209,221,176,83,134,82,
++  200,190,166,11,170,162,103,170,215,193,229,26,37,197,45,53,35,179,164,80,
++  11,214,244,77,201,108,174,182,26,210,148,233,146,252,186,195,36,247,81,2,
++  160,71,95,16,84,192,54,174,86,204,92,106,116,219,13,38,115,216,9,182,
++  56,97,206,151,221,102,207,220,24,239,56,118,39,235,113,42,123,29,159,46,
++  129,94,218,206,157,54,179,101,208,174,33,221,75,113,59,134,129,115,96,160,
++  28,193,80,232,137,124,135,156,20,43,56,157,186,101,216,192,50,141,8,130,
++  195,74,130,150,233,109,40,124,96,54,16,71,13,51,221,146,105,187,40,238,
++  165,141,105,10,135,137,239,54,144,248,53,90,50,145,136,204,117,76,3,3,
++  207,183,185,54,162,89,103,107,49,110,248,101,92,139,62,102,214,243,199,57,
++  7,75,211,15,125,132,181,73,148,146,73,109,25,116,72,174,201,219,90,153,
++  169,13,32,180,81,116,239,105,159,101,226,34,16,186,236,164,38,59,97,33,
++  93,223,222,37,236,35,227,65,211,31,118,142,9,28,203,224,250,64,94,35,
++  142,55,172,148,5,7,0,226,3,215,151,203,155,122,162,207,191,118,77,45,
++  124,21,118,89,17,44,54,232,95,100,25,223,249,105,166,180,162,202,224,71,
++  42,251,142,7,75,228,94,28,187,95,148,139,58,254,63,214,34,219,93,137,
++  24,109,179,202,94,96,206,49,199,45,194,163,90,136,192,132,152,111,138,10,
++  9,235,107,181,88,196,194,69,223,13,97,79,2,159,82,27,241,229,111,216,
++  116,58,45,4,41,181,109,197,172,169,171,181,200,215,98,87,10,220,144,233,
++  62,118,169,20,181,249,29,192,191,194,215,56,247,64,138,32,86,185,200,53,
++  123,126,48,84,105,199,70,6,81,199,5,11,25,49,247,49,180,180,80,51,
++  110,48,134,70,45,5,1,211,6,125,113,250,251,5,210,255,74,184,82,210,
++  239,185,131,194,200,226,117,73,185,15,172,118,99,76,26,179,21,45,166,241,
++  120,3,197,55,0,170,33,78,114,53,148,55,216,176,124,169,182,166,143,45,
++  195,147,254,89,112,47,54,169,189,96,141,95,108,211,173,246,27,151,19,182,
++  211,233,178,226,97,47,216,2,186,35,118,115,147,85,48,204,170,204,168,40,
++  86,42,115,115,128,234,176,135,168,49,80,195,190,52,34,23,200,189,34,0,
++  27,17,174,185,25,155,0,117,225,25,58,181,208,93,52,129,91,182,135,224,
++  13,157,26,16,30,91,115,212,166,241,154,251,187,181,81,48,81,216,170,67,
++  191,158,244,168,68,148,216,219,104,255,247,241,183,102,60,195,33,231,171,175,
++  236,134,244,12,105,109,119,105,72,114,38,19,3,210,214,32,68,69,225,212,
++  58,130,148,22,71,200,188,162,139,12,100,132,91,105,213,45,101,106,233,156,
++  198,18,245,165,84,152,4,186,66,91,146,44,92,205,126,255,157,12,229,227,
++  117,85,70,14,25,132,19,145,246,101,18,138,155,183,145,235,64,111,167,152,
++  166,176,226,70,248,50,166,233,90,149,78,219,35,172,200,145,77,130,230,79,
++  216,89,201,182,203,236,41,187,158,7,74,114,93,78,219,230,134,29,48,43,
++  90,157,122,181,83,31,210,29,187,168,229,218,40,19,249,210,181,105,95,50,
++  107,37,9,236,222,242,100,107,114,194,206,204,143,90,183,123,173,76,92,23,
++  251,189,38,197,252,32,108,250,148,0,232,7,129,157,68,121,57,160,14,39,
++  107,116,34,56,6,36,141,106,152,53,164,202,252,247,185,74,108,133,218,167,
++  203,117,141,62,8,170,178,83,62,168,232,78,19,73,130,234,114,2,83,143,
++  9,68,205,175,95,112,110,249,236,211,239,245,47,180,11,167,25,60,248,165,
++  181,62,199,178,6,143,231,247,118,2,130,211,70,87,185,79,133,62,144,221,
++  94,193,28,228,130,37,108,208,21,119,48,135,132,118,162,164,172,26,100,171,
++  92,197,201,40,84,246,197,207,171,167,81,53,15,132,160,248,197,247,62,75,
++  147,251,164,207,148,12,69,23,110,164,62,226,228,113,109,141,134,160,246,42,
++  104,95,78,195,0,121,252,54,97,52,77,249,218,186,44,114,142,112,56,44,
++  119,196,5,193,68,95,45,4,127,92,117,36,251,225,91,117,213,51,180,156,
++  72,250,189,150,4,188,109,219,213,238,56,110,155,188,109,202,148,96,221,177,
++  23,233,215,53,140,231,148,176,120,236,140,91,101,3,195,4,77,15,170,27,
++  205,253,138,26,208,41,118,43,107,3,177,165,199,102,12,153,35,224,65,100,
++  64,172,92,134,100,116,115,242,27,89,231,22,163,39,148,68,126,134,103,34,
++  96,174,211,28,153,77,153,55,52,176,75,63,26,37,11,114,87,115,238,233,
++  128,230,22,74,133,198,145,91,193,175,77,29,113,88,46,23,9,143,59,101,
++  105,25,85,41,120,252,212,113,143,20,126,201,147,63,105,96,2,208,163,190,
++  52,240,217,43,84,1,186,72,64,206,225,164,32,115,204,225,35,93,170,68,
++  148,215,11,57,71,51,111,84,127,94,11,177,7,36,166,214,215,125,57,33,
++  89,151,13,122,246,80,83,213,237,70,104,208,155,129,187,241,163,219,14,125,
++  226,216,91,156,109,113,174,183,247,186,167,246,191,6,253,15,4,39,31,23,
++  43,36,0,0,
++};
++static const size_t kevfm_page_kevfm_html_len = 3304;
++
++/* setup.html: 12240 bytes, gzipped 4096 */
++static const uint8_t kevfm_page_setup_html[] PROGMEM = {
++  31,139,8,0,0,0,0,0,2,255,181,90,235,114,219,56,150,254,159,167,
++  128,217,189,99,105,98,210,146,124,137,35,75,202,78,167,210,51,93,147,190,
++  84,146,153,173,173,169,254,1,145,160,132,152,34,184,36,36,91,221,227,170,
++  121,154,125,176,125,146,61,231,0,32,65,138,114,146,222,94,87,42,38,113,
++  57,56,247,243,29,208,179,147,68,197,122,95,8,182,214,155,108,241,108,134,
++  191,88,198,243,213,60,16,121,128,3,130,39,240,107,35,52,103,241,154,151,
++  149,208,243,96,171,211,240,38,112,195,57,223,136,121,176,147,226,190,80,165,
++  14,88,172,114,45,114,88,118,47,19,189,158,39,98,39,99,17,210,203,25,
++  147,185,212,146,103,97,21,243,76,204,199,103,204,237,11,83,169,231,177,218,
++  137,178,67,88,175,197,70,132,177,202,84,233,209,254,106,180,28,165,227,75,
++  92,171,165,206,196,226,175,98,247,237,247,236,29,79,164,98,255,33,195,111,
++  229,236,220,76,60,155,85,122,143,191,25,155,150,74,105,246,43,35,98,192,
++  2,82,158,178,132,151,119,183,44,12,151,171,41,179,100,241,53,230,101,2,
++  3,227,139,49,159,76,112,32,147,57,172,254,106,194,47,174,46,105,64,230,
++  119,240,46,68,58,73,175,241,125,179,213,2,183,220,44,95,222,240,23,56,
++  194,227,24,184,133,161,20,118,93,112,58,133,227,146,52,125,193,175,151,183,
++  236,17,184,250,35,112,180,84,15,97,37,127,145,57,240,176,84,101,34,202,
++  16,134,204,60,218,228,12,70,147,61,44,220,240,114,37,243,41,27,221,178,
++  37,143,239,86,165,218,230,64,112,199,203,1,74,48,188,53,194,185,17,96,
++  17,134,82,133,76,140,175,139,135,243,113,116,201,66,94,20,153,8,171,125,
++  165,197,230,140,5,239,197,74,9,246,183,239,130,51,246,78,45,149,86,103,
++  172,226,121,21,86,162,148,169,225,97,195,101,78,167,63,24,67,78,217,229,
++  245,168,0,6,107,126,24,223,106,117,203,10,158,36,36,197,100,82,60,208,
++  145,12,44,29,15,38,55,240,244,156,137,124,55,168,120,42,66,94,10,14,
++  220,129,59,129,160,90,171,205,16,248,76,100,85,100,124,63,101,105,38,128,
++  54,254,31,38,178,20,177,150,10,206,0,201,182,155,252,150,173,120,97,164,
++  177,250,1,23,21,37,112,215,217,206,51,185,202,67,9,50,86,176,23,236,
++  32,74,183,247,178,179,87,110,86,176,223,74,118,77,179,107,33,87,107,237,
++  222,172,77,74,112,175,45,80,27,147,236,106,249,17,88,67,199,69,222,118,
++  72,222,183,201,87,163,209,200,158,50,110,91,14,237,129,230,6,119,26,71,
++  147,171,82,108,204,186,168,218,46,189,149,168,193,17,174,111,153,148,188,108,
++  216,34,18,189,172,73,172,39,30,129,107,71,192,95,123,67,107,51,161,65,
++  31,97,85,240,152,204,21,141,39,56,172,197,131,14,117,9,214,79,85,185,
++  153,178,109,81,136,50,230,149,232,48,97,28,251,208,100,31,183,149,150,233,
++  62,180,113,58,101,120,128,8,151,66,223,11,145,31,177,9,137,142,225,134,
++  129,112,224,212,56,49,60,180,0,153,31,149,158,102,234,126,202,214,50,73,
++  240,0,162,149,11,77,49,101,227,8,221,11,118,128,50,42,149,201,196,210,
++  197,112,30,54,27,166,25,175,116,24,175,101,150,28,238,181,118,140,74,117,
++  255,69,126,54,65,38,173,91,141,71,163,127,243,226,3,125,208,74,225,203,
++  156,171,92,56,97,167,158,237,101,190,134,104,212,46,150,235,87,50,24,113,
++  48,5,155,166,48,18,111,203,10,119,20,74,122,234,69,206,35,76,168,192,
++  63,178,13,12,52,234,11,239,75,100,151,231,251,123,32,43,236,22,205,49,
++  40,124,215,121,97,92,181,215,29,105,203,18,10,196,39,20,68,65,45,242,
++  196,170,104,226,199,90,19,211,134,146,108,130,242,178,171,168,150,17,187,206,
++  209,33,19,169,188,215,181,76,118,164,133,153,138,239,154,211,198,173,20,96,
++  222,82,153,101,189,66,99,164,192,214,218,178,35,147,246,140,48,95,148,210,
++  70,142,239,140,47,69,214,81,254,205,39,148,47,243,98,171,255,129,197,124,
++  142,78,241,243,153,63,82,240,170,186,7,37,253,236,201,216,241,199,11,228,
++  121,114,52,217,57,151,60,18,70,95,90,140,90,254,236,114,97,109,126,226,
++  124,154,170,120,139,238,164,182,218,212,222,73,231,236,58,11,89,142,237,105,
++  148,191,10,168,48,185,118,121,117,253,101,129,123,67,6,63,72,176,79,56,
++  190,206,125,23,48,202,188,238,81,230,203,151,47,125,109,246,150,241,90,44,
++  123,222,87,99,62,158,140,174,250,85,119,239,234,212,213,232,88,236,3,115,
++  83,16,157,47,51,129,185,77,97,206,215,160,133,232,202,57,63,88,166,19,
++  32,199,242,80,135,195,227,198,180,42,171,85,66,181,232,24,135,164,75,7,
++  204,62,175,208,69,162,44,187,59,0,91,245,174,223,200,60,172,131,57,162,
++  66,231,85,99,67,109,83,232,125,203,132,100,189,227,22,175,10,66,68,181,
++  75,201,28,125,52,92,98,34,185,125,42,143,56,157,78,142,4,146,241,23,
++  173,138,176,95,229,29,135,186,194,40,230,185,220,112,147,81,42,54,138,110,
++  42,134,212,56,0,155,60,69,196,13,166,132,84,175,37,64,49,87,44,194,
++  73,3,223,194,210,250,144,139,191,127,191,19,251,180,132,106,81,49,12,64,
++  173,240,191,6,21,148,74,115,45,6,23,215,163,68,96,148,63,26,149,36,
++  224,51,184,208,43,73,46,170,26,88,136,56,112,124,83,39,104,218,67,160,
++  229,0,58,184,189,126,134,40,27,219,53,133,189,78,155,145,65,1,190,89,
++  208,143,217,137,220,96,139,193,155,124,192,119,224,111,182,156,59,151,76,68,
++  202,183,153,93,146,66,167,64,160,178,79,26,111,1,255,28,175,189,113,16,
++  111,118,110,123,145,217,185,109,172,16,214,99,191,131,248,90,38,243,0,31,
++  2,236,85,102,6,154,226,35,188,32,64,173,202,120,30,220,137,93,186,9,
++  9,109,134,147,171,235,232,99,177,10,32,145,65,71,20,216,165,137,220,153,
++  39,164,49,94,252,167,218,150,204,52,71,232,50,10,78,30,215,243,5,139,
++  1,246,84,243,0,128,103,64,231,227,195,226,173,208,167,21,91,1,138,146,
++  154,65,237,220,35,13,106,170,162,217,121,97,207,57,183,7,25,81,144,83,
++  124,169,76,101,35,90,133,140,239,28,87,235,201,98,6,57,57,95,188,94,
++  43,85,9,143,36,232,4,199,103,203,45,152,51,119,12,97,74,50,28,149,
++  34,45,69,181,14,24,21,178,192,44,11,22,239,204,240,236,220,12,44,128,
++  141,73,163,1,71,6,193,163,33,147,201,74,7,11,127,142,66,62,48,108,
++  213,122,40,80,253,150,165,183,74,221,129,211,130,41,75,6,8,17,234,231,
++  93,245,63,255,250,111,35,121,45,63,170,241,56,247,27,158,111,121,6,25,
++  184,203,255,247,123,71,147,201,42,63,213,12,25,196,246,145,218,113,169,43,
++  106,127,61,241,138,126,233,44,242,245,79,11,106,251,122,107,49,114,3,70,
++  238,7,150,49,225,136,89,102,138,137,174,222,1,123,12,246,128,229,64,174,
++  170,100,18,44,126,176,124,26,134,104,222,91,79,181,218,10,135,193,98,57,
++  161,173,216,48,102,34,95,233,245,60,152,188,12,168,71,140,121,33,53,4,
++  212,47,176,94,165,169,29,84,37,98,34,59,82,21,34,203,160,59,143,239,
++  128,111,158,85,226,24,127,8,107,130,197,79,22,220,60,205,155,131,64,150,
++  63,218,234,243,119,241,187,242,231,252,9,128,7,248,147,207,7,237,131,230,
++  62,96,9,215,60,244,5,97,239,17,167,20,71,197,169,195,21,106,159,21,
++  3,159,26,231,160,85,109,87,60,116,61,107,31,72,129,193,226,181,202,115,
++  144,171,118,51,231,56,158,115,55,113,110,99,251,48,208,41,157,98,15,17,
++  184,83,173,83,118,131,255,61,229,93,23,75,46,242,143,70,46,35,194,65,
++  115,70,208,14,59,183,150,114,110,176,248,176,22,38,199,65,173,146,80,186,
++  244,90,64,166,129,196,74,21,19,138,100,194,32,15,139,205,82,64,83,176,
++  45,176,172,153,224,55,161,3,81,112,101,89,114,105,238,9,153,177,112,5,
++  45,102,77,41,235,10,78,34,123,34,22,245,110,10,22,47,176,187,226,124,
++  151,98,250,141,57,38,135,143,0,151,206,80,32,48,175,185,234,10,223,153,
++  108,190,92,152,52,10,85,8,203,53,98,56,20,153,47,1,53,67,117,2,
++  232,3,212,0,104,96,198,69,98,160,155,61,227,43,40,51,71,132,180,133,
++  13,185,68,98,7,38,157,113,182,134,156,60,15,206,131,197,55,120,26,168,
++  81,59,205,207,206,57,72,100,72,96,149,195,114,134,55,112,113,41,11,189,
++  120,54,72,183,185,81,225,96,200,126,133,211,130,45,88,168,2,115,197,58,
++  184,133,119,168,161,236,107,54,103,205,58,153,192,74,176,155,222,150,57,168,
++  56,222,110,160,8,71,80,155,222,100,2,31,191,217,127,151,224,34,40,175,
++  142,64,108,156,26,60,13,8,97,120,158,1,230,5,88,48,103,249,54,203,
++  206,140,87,253,64,232,102,206,254,241,243,45,138,93,31,40,170,120,80,225,
++  145,72,9,41,212,103,198,165,0,212,99,143,29,4,224,135,1,94,128,68,
++  104,199,215,6,180,192,242,234,182,102,54,146,192,71,249,151,15,223,191,181,
++  144,193,157,129,93,233,160,132,12,105,148,96,184,70,254,112,140,45,230,44,
++  188,186,98,175,216,37,155,54,35,215,56,114,225,143,188,192,145,9,140,140,
++  207,216,26,54,7,164,65,70,229,106,128,20,37,12,66,151,47,217,108,206,
++  46,225,247,243,231,67,88,248,124,206,78,103,210,89,245,148,61,7,29,227,
++  138,28,168,5,152,30,166,64,105,8,195,167,117,185,176,0,214,174,253,35,
++  187,164,105,44,27,179,115,185,56,53,199,90,169,79,91,245,20,37,133,12,
++  90,74,30,82,50,131,56,6,36,197,51,134,180,114,164,194,84,202,46,131,
++  5,190,3,111,44,176,17,72,178,60,90,131,190,253,241,245,95,25,178,93,
++  237,86,117,137,85,232,155,120,123,252,141,122,152,7,35,104,187,39,151,240,
++  175,125,90,46,68,82,65,24,212,201,127,49,43,184,94,51,112,238,239,95,
++  0,114,252,251,11,126,197,174,240,146,140,141,225,149,141,118,23,107,232,182,
++  224,197,14,177,241,110,60,106,6,66,120,250,203,181,255,30,142,255,62,110,
++  237,8,199,191,108,38,108,180,190,6,218,23,96,49,28,30,133,215,108,244,
++  75,112,142,200,98,183,66,141,249,238,80,168,74,15,182,37,120,38,86,4,
++  223,39,232,210,23,76,35,238,217,223,222,189,125,15,136,62,94,255,196,1,
++  152,87,3,90,218,210,124,42,116,188,54,116,126,101,27,161,215,10,208,68,
++  240,211,143,239,63,4,230,250,120,106,232,61,14,35,136,215,220,139,197,210,
++  157,89,211,42,163,143,149,202,7,195,40,230,72,180,21,182,110,13,116,146,
++  119,224,142,145,186,131,208,3,170,134,25,243,251,177,37,32,149,188,1,34,
++  130,51,178,196,25,67,187,96,217,118,7,203,148,13,78,112,193,208,81,15,
++  222,32,214,166,204,146,123,248,35,178,78,142,27,112,125,100,202,55,91,176,
++  201,203,102,111,83,9,48,227,169,60,219,51,76,52,62,33,87,1,38,47,
++  233,187,6,135,124,81,86,62,117,199,34,251,195,31,216,73,65,188,30,178,
++  102,82,175,243,46,127,123,97,183,226,111,199,228,140,221,52,68,218,91,193,
++  73,75,193,56,192,64,193,43,205,110,142,48,229,83,91,176,139,79,139,220,
++  208,55,226,94,244,137,235,104,4,135,166,195,92,217,178,28,0,142,55,248,
++  57,66,231,190,163,22,165,90,66,98,4,95,61,180,53,165,224,161,39,131,
++  89,139,158,68,196,58,9,212,78,187,52,106,82,39,235,93,10,12,35,35,
++  81,125,185,49,135,234,182,21,102,176,179,20,234,48,32,94,128,239,86,102,
++  10,186,224,156,250,169,243,123,153,202,0,195,6,249,158,178,134,251,41,253,
++  223,23,50,162,106,130,134,188,23,70,32,20,142,73,133,179,48,14,169,249,
++  159,255,100,193,107,181,205,18,172,235,168,222,136,125,168,75,242,161,64,164,
++  189,94,137,44,118,11,186,154,98,236,235,129,233,189,32,124,49,89,190,133,
++  206,34,2,196,63,112,53,28,202,22,44,105,80,219,211,235,8,5,28,95,
++  210,156,89,131,154,97,83,249,144,209,198,53,101,133,138,208,188,212,216,87,
++  129,59,34,174,65,72,19,224,183,33,172,188,148,2,168,12,44,23,17,131,
++  225,26,215,14,154,178,14,133,234,207,114,135,93,146,197,57,147,17,3,12,
++  163,114,12,35,64,121,166,221,165,115,42,134,247,0,112,90,20,212,148,188,
++  31,76,144,176,159,186,209,98,141,0,142,0,148,58,206,20,112,173,34,246,
++  93,126,120,114,255,169,93,5,181,52,9,112,20,58,249,174,50,31,251,211,
++  110,111,4,52,186,77,36,121,20,207,171,123,81,70,236,79,37,53,217,192,
++  143,204,50,20,8,91,74,202,57,175,126,155,147,245,37,118,173,86,171,76,
++  96,215,50,16,237,186,245,0,155,69,4,186,0,164,118,75,1,2,99,17,
++  245,182,39,115,160,219,116,65,16,15,39,56,135,5,173,18,26,175,211,93,
++  86,51,234,248,122,208,157,54,116,230,120,76,68,132,140,79,152,238,19,76,
++  90,87,123,7,34,106,12,7,174,251,102,7,15,168,125,1,46,58,0,70,
++  120,190,18,16,252,141,44,195,118,121,46,69,14,237,3,212,3,93,249,50,
++  98,191,14,60,128,89,233,106,193,75,112,39,184,212,102,105,52,28,206,183,
++  34,226,180,231,26,226,7,85,247,69,128,224,182,224,197,123,144,214,180,59,
++  167,221,16,63,160,232,176,31,157,12,42,122,195,91,238,3,189,131,108,210,
++  21,33,91,96,224,211,216,86,238,140,179,34,88,198,83,128,124,112,235,81,
++  145,149,233,232,230,30,166,6,190,18,241,240,99,58,200,35,19,56,128,85,
++  71,110,19,82,108,107,162,221,173,150,208,46,119,46,74,16,25,18,96,206,
++  35,3,153,159,119,48,38,86,115,179,12,131,213,157,234,37,14,199,229,43,
++  64,155,173,157,154,175,130,69,101,26,52,66,157,167,53,248,173,113,40,98,
++  222,60,162,254,225,85,231,96,218,142,51,222,110,132,170,46,87,152,150,218,
++  207,97,167,221,27,153,186,95,60,245,25,246,206,235,54,133,63,226,132,117,
++  20,128,81,170,193,30,216,205,157,62,59,76,112,167,254,141,73,129,106,146,
++  4,238,235,107,19,106,24,14,212,7,251,236,253,195,19,183,40,30,185,223,
++  239,42,197,87,69,243,115,250,155,46,86,124,121,251,111,87,78,135,45,251,
++  180,174,88,168,57,255,228,125,202,193,37,138,11,90,47,80,200,214,115,114,
++  255,255,218,138,114,255,94,100,176,67,65,254,161,207,135,193,144,128,213,145,
++  21,200,202,144,32,215,145,5,200,19,44,40,238,251,231,251,190,3,54,117,
++  169,143,32,134,225,176,47,89,102,8,43,206,88,183,141,111,96,16,57,46,
++  192,94,250,141,153,30,197,27,210,235,167,16,4,117,174,27,111,149,201,200,
++  62,26,177,109,60,174,187,109,29,11,162,35,76,239,16,192,79,9,128,170,
++  170,134,196,16,148,20,209,119,197,65,125,238,99,253,132,245,239,75,133,38,
++  244,139,24,113,142,250,127,133,244,119,60,219,10,202,36,109,38,79,108,92,
++  55,13,5,21,245,110,201,125,162,187,56,64,122,204,0,116,19,181,30,68,
++  55,0,253,80,66,163,43,210,194,161,160,119,98,159,168,251,188,37,42,150,
++  117,218,37,34,152,102,243,185,99,16,178,36,170,139,148,51,24,222,122,103,
++  80,113,226,5,72,154,188,198,63,167,24,128,135,29,54,135,168,183,10,90,
++  149,15,116,85,103,75,68,211,118,192,204,192,222,252,251,61,98,51,212,20,
++  222,79,150,214,223,120,195,15,85,183,205,160,213,186,233,179,93,235,128,75,
++  168,72,88,214,16,136,188,178,207,243,177,189,77,193,214,34,134,146,44,224,
++  45,87,97,5,81,38,130,35,141,120,183,5,191,253,156,238,3,219,11,39,
++  128,235,15,209,205,106,125,89,16,227,175,107,57,5,78,160,40,57,170,3,
++  118,214,146,63,127,14,109,235,248,10,25,3,248,245,65,110,4,192,222,14,
++  50,37,107,217,54,143,61,158,193,242,209,104,120,232,172,117,155,228,14,122,
++  138,173,35,32,152,250,254,3,222,62,155,179,201,136,56,235,195,178,153,226,
++  9,225,132,58,188,91,247,42,206,222,142,205,224,255,213,166,173,43,74,82,
++  25,14,80,59,134,23,213,195,158,238,18,198,253,138,99,32,184,107,243,2,
++  250,112,252,208,139,25,217,241,102,176,147,129,207,216,73,205,139,195,183,183,
++  245,197,145,155,232,129,159,32,72,11,129,254,94,24,180,15,80,122,241,95,
++  18,70,232,199,138,3,68,5,99,130,106,212,103,26,244,3,211,22,251,28,
++  255,40,217,46,254,223,42,108,113,142,213,254,222,242,106,183,126,121,129,181,
++  33,4,101,45,149,229,102,16,152,179,137,123,250,211,46,144,229,21,214,56,
++  191,123,50,63,173,219,142,148,182,121,247,29,180,217,121,100,29,7,94,97,
++  126,244,158,209,141,250,179,59,243,46,1,251,130,215,139,58,240,56,247,93,
++  247,179,213,96,130,25,47,120,234,8,166,112,112,31,88,63,159,80,189,237,
++  41,103,55,151,31,230,59,230,176,198,12,222,193,244,5,237,11,184,199,66,
++  237,81,36,148,16,233,82,110,6,80,31,112,130,62,2,218,9,51,98,145,
++  95,115,90,139,1,187,254,255,94,200,61,105,90,245,252,217,65,177,211,92,
++  111,127,255,212,87,105,231,229,254,167,27,48,201,70,37,194,176,90,79,120,
++  151,161,245,88,19,35,152,201,182,203,131,252,232,174,49,128,174,86,20,47,
++  64,28,237,96,194,255,79,73,194,120,174,128,171,26,6,16,36,184,7,54,
++  241,146,9,47,105,234,203,82,214,123,39,118,228,38,231,217,211,177,224,213,
++  156,174,78,14,171,23,236,120,28,34,108,133,228,100,191,167,65,218,49,127,
++  63,114,110,254,126,255,127,1,99,46,243,88,208,47,0,0,
++};
++static const size_t kevfm_page_setup_html_len = 4096;
++
++/* firmware.html: 9082 bytes, gzipped 3122 */
++static const uint8_t kevfm_page_firmware_html[] PROGMEM = {
++  31,139,8,0,0,0,0,0,2,255,229,90,235,114,220,182,21,254,239,167,
++  128,104,39,221,117,118,185,23,75,142,164,189,120,38,78,220,164,141,147,142,
++  173,76,59,147,228,7,150,4,119,17,145,4,3,130,43,171,137,102,250,52,
++  125,176,62,73,191,3,128,151,189,200,150,167,211,233,143,218,30,105,137,203,
++  193,185,124,231,59,7,92,207,79,98,21,153,219,66,176,141,201,210,229,163,
++  57,253,98,41,207,215,139,64,228,1,13,8,30,227,87,38,12,103,209,134,
++  235,82,152,69,80,153,100,120,30,212,195,57,207,196,34,216,74,113,83,40,
++  109,2,22,169,220,136,28,203,110,100,108,54,139,88,108,101,36,134,246,97,
++  192,100,46,141,228,233,176,140,120,42,22,147,1,171,247,13,19,105,22,145,
++  218,10,189,39,216,108,68,38,134,145,74,149,238,200,126,60,94,141,147,201,
++  41,173,53,210,164,98,249,103,177,125,245,154,189,225,177,84,236,149,212,217,
++  13,215,98,62,114,115,143,230,165,185,165,223,140,93,106,165,12,251,141,89,
++  121,208,130,132,95,178,152,235,235,25,27,14,87,235,75,230,37,211,99,196,
++  117,140,129,201,179,9,159,78,105,32,149,57,86,63,158,242,103,103,167,118,
++  64,230,215,120,22,34,153,38,207,233,57,171,140,160,45,231,171,139,115,254,
++  57,141,240,40,130,194,24,74,176,235,25,167,161,181,82,180,230,44,137,159,
++  157,199,246,88,78,207,73,242,57,127,190,154,177,59,168,249,20,42,174,212,
++  187,97,41,255,46,115,40,181,82,58,22,122,136,33,55,79,113,26,96,52,
++  190,197,194,140,235,181,204,47,217,120,198,86,60,186,94,107,85,229,16,184,
++  229,186,71,38,245,103,206,218,122,4,58,99,40,81,164,213,228,121,241,110,
++  52,9,79,207,216,144,23,69,42,134,229,109,105,68,54,96,193,91,177,86,
++  130,253,240,77,48,96,111,212,74,25,53,96,37,207,203,97,41,180,76,156,
++  18,25,151,185,61,254,157,139,238,37,59,125,62,46,160,97,163,16,227,149,
++  81,51,86,240,56,182,102,76,167,197,59,123,38,67,248,163,222,244,28,159,
++  62,99,34,223,246,74,158,136,33,66,198,161,30,48,6,75,141,81,89,31,
++  138,198,178,44,82,126,123,201,146,84,64,54,253,28,198,82,139,200,72,133,
++  51,96,90,149,229,51,182,230,133,51,199,59,8,184,21,26,218,237,109,231,
++  169,92,231,67,9,27,75,236,69,100,132,174,247,158,238,237,149,217,26,251,
++  189,101,207,237,236,70,200,245,198,212,79,62,40,26,152,171,32,109,98,109,
++  87,171,95,160,26,161,153,116,219,146,248,110,80,30,143,199,99,127,202,100,
++  55,116,20,16,138,55,0,54,9,167,103,90,100,110,93,88,86,171,206,74,
++  242,224,152,214,239,196,212,226,174,191,35,36,188,104,68,108,166,221,163,240,
++  215,169,218,93,124,110,23,167,194,192,33,195,178,224,145,141,87,56,153,210,
++  176,17,239,204,208,104,132,63,81,58,187,100,85,81,8,29,241,82,236,105,
++  225,176,222,247,122,83,246,16,140,15,32,73,19,253,67,247,217,216,53,80,
++  153,156,123,168,120,105,43,67,88,107,167,45,146,206,143,132,225,226,226,162,
++  29,189,39,41,26,69,189,250,143,39,124,50,29,159,213,89,33,243,13,80,
++  110,188,135,110,234,160,159,145,215,43,93,210,142,66,73,135,157,90,185,240,
++  215,74,10,115,212,222,251,82,176,86,113,2,83,74,149,202,216,207,18,203,
++  244,247,14,63,171,97,67,103,93,2,212,124,149,10,114,175,162,88,25,224,
++  27,73,236,87,104,117,115,8,124,135,113,23,119,74,161,27,77,3,244,243,
++  158,164,176,162,178,114,221,129,206,164,1,95,38,243,97,157,12,147,240,89,
++  131,85,172,15,137,222,106,134,173,13,166,49,194,133,91,1,190,219,95,128,
++  161,26,55,22,203,251,243,199,0,126,238,64,219,104,55,174,181,179,98,80,
++  0,242,125,41,77,220,31,46,102,197,137,69,26,91,199,71,16,119,102,199,
++  14,194,238,195,72,28,144,164,234,230,146,109,100,28,139,188,62,105,104,84,
++  225,92,218,57,73,118,3,183,74,85,116,61,235,156,61,254,100,86,243,209,
++  251,97,109,115,85,58,130,180,27,128,142,210,29,35,243,162,50,63,82,205,
++  95,36,50,21,63,183,20,231,228,223,235,245,253,180,216,97,153,218,121,167,
++  214,119,173,81,251,167,93,94,210,47,20,145,20,36,137,2,188,170,64,243,
++  59,137,125,65,121,125,250,225,188,190,39,105,62,182,0,54,54,249,160,232,
++  110,156,109,88,92,212,186,113,201,85,46,216,137,204,168,109,225,185,113,235,
++  18,244,21,182,224,88,178,180,25,181,155,75,126,1,127,16,178,107,250,159,
++  143,124,231,50,31,249,78,140,106,62,53,72,168,189,212,207,204,93,177,162,
++  143,120,160,146,85,234,104,17,92,139,109,146,13,109,253,25,78,207,158,135,
++  191,20,235,0,105,142,198,41,240,75,99,185,117,159,72,198,100,233,26,167,
++  164,105,156,48,84,207,22,44,74,121,89,46,2,20,162,96,121,181,145,37,
++  211,118,245,134,151,12,7,148,128,25,155,175,152,140,23,1,232,81,195,230,
++  96,249,175,127,252,115,62,90,45,231,163,194,159,55,242,7,58,67,72,99,
++  122,40,93,25,175,79,160,202,80,43,184,153,46,191,207,41,170,40,55,49,
++  55,164,211,180,213,189,222,1,174,11,26,77,61,154,252,20,85,12,75,202,
++  129,83,109,35,162,235,128,89,44,6,110,101,176,124,73,131,112,189,110,14,
++  113,51,239,17,233,240,224,100,162,87,49,60,77,247,165,126,227,134,119,133,
++  53,30,232,186,20,108,232,36,209,135,142,183,58,22,18,45,116,207,196,51,
++  86,74,251,25,201,148,210,54,185,60,42,221,82,96,119,239,181,16,69,128,
++  86,89,20,12,109,181,15,99,145,86,235,53,24,23,205,92,149,27,153,50,
++  105,152,22,176,64,155,50,100,87,88,151,85,165,140,88,9,194,42,89,92,
++  105,228,169,221,238,92,22,182,90,183,102,17,166,131,229,183,74,93,151,214,
++  187,104,230,197,13,208,95,195,5,255,254,40,205,215,232,108,122,115,116,27,
++  185,213,78,139,66,209,38,29,163,153,31,143,63,31,57,20,91,45,145,8,
++  88,182,236,135,236,45,223,66,217,191,202,225,43,137,219,3,117,127,130,241,
++  60,102,41,101,46,67,239,104,160,95,9,109,249,109,173,26,54,59,156,61,
++  4,116,63,20,169,66,125,226,77,50,48,162,172,14,250,246,172,100,54,67,
++  241,212,178,250,24,16,72,58,30,142,120,254,7,242,41,143,54,222,108,186,
++  8,89,140,224,156,249,106,25,174,100,78,233,98,143,98,137,86,25,118,35,
++  207,138,13,81,13,252,23,169,12,68,74,77,41,182,33,127,58,78,183,20,
++  235,1,72,219,131,26,25,248,68,5,161,64,210,147,252,218,196,3,68,187,
++  13,149,53,123,15,201,172,110,52,106,72,59,181,156,67,118,192,125,136,232,
++  234,225,144,174,186,152,174,142,128,122,47,128,142,74,151,115,206,54,90,36,
++  139,96,20,44,191,0,239,51,163,90,167,207,71,28,251,253,74,208,167,35,
++  204,121,25,105,89,152,229,163,94,82,229,14,5,189,62,251,13,66,131,170,
++  20,8,165,150,145,9,102,120,6,57,179,39,108,193,218,117,50,198,74,68,
++  209,84,200,42,220,155,1,188,220,132,107,97,190,74,5,125,252,226,246,155,
++  152,22,129,183,107,1,133,74,83,202,150,5,203,171,20,23,182,27,46,9,
++  157,111,92,118,145,116,158,162,139,38,163,154,115,128,224,215,229,186,39,176,
++  156,74,201,128,93,203,220,158,44,210,144,6,94,186,43,48,54,211,19,251,
++  253,119,22,4,51,154,180,206,253,14,119,102,76,185,48,124,198,122,180,153,
++  189,96,1,163,39,251,112,137,245,190,213,106,206,92,85,229,109,79,229,116,
++  202,147,158,103,202,126,216,116,153,11,228,235,140,102,106,190,59,54,231,1,
++  180,55,69,250,157,96,214,226,177,31,210,175,50,76,69,190,54,27,210,161,
++  171,4,57,231,149,210,222,57,112,128,11,12,154,136,132,245,118,61,215,247,
++  97,152,217,249,3,175,26,93,9,55,69,65,176,163,86,157,47,137,174,114,
++  117,211,235,187,89,184,250,74,102,66,85,166,133,3,95,3,40,189,250,104,
++  168,39,76,180,233,5,142,139,70,142,242,80,148,185,169,74,92,141,81,203,
++  145,212,40,217,65,174,134,32,72,141,164,187,235,135,64,97,222,65,152,238,
++  0,71,135,191,148,10,7,204,142,172,43,77,123,174,51,187,52,33,157,133,
++  144,46,16,212,24,108,16,144,172,142,226,86,223,1,155,226,94,9,153,222,
++  45,104,180,25,27,61,69,167,210,80,57,28,112,139,251,201,211,81,35,191,
++  3,180,224,75,72,38,174,111,106,59,188,180,83,223,9,62,80,198,215,119,
++  60,4,33,204,15,168,175,15,188,55,233,15,161,199,183,0,253,61,180,182,
++  187,119,150,83,234,247,29,118,191,149,88,131,62,176,23,120,114,232,59,96,
++  125,120,137,173,107,247,47,233,158,215,66,248,94,129,54,27,108,102,226,225,
++  190,148,117,2,17,195,136,19,64,246,233,164,13,97,11,58,54,108,176,56,
++  103,23,99,138,216,189,145,108,68,8,156,230,34,222,4,235,170,41,44,136,
++  16,85,22,84,7,97,59,95,10,113,136,18,179,21,84,196,57,93,211,80,
++  53,6,196,138,64,158,176,133,205,21,22,190,22,54,128,43,74,217,123,173,
++  180,44,225,236,116,26,221,13,216,105,173,223,110,246,150,27,152,216,2,248,
++  35,128,128,165,182,242,31,89,71,227,244,35,229,145,64,132,140,41,202,203,
++  209,72,243,155,112,45,205,166,66,160,132,246,175,4,67,56,97,68,22,65,
++  78,189,99,244,147,165,253,159,70,47,158,140,236,76,75,10,150,10,237,25,
++  157,252,74,56,232,9,53,240,133,243,11,168,242,88,2,18,165,237,141,91,
++  198,164,157,159,126,74,34,249,22,130,136,3,251,125,146,101,147,196,242,110,
++  67,59,20,75,216,77,44,221,31,208,150,76,148,37,98,226,217,190,113,204,
++  49,180,26,181,94,167,162,1,236,128,157,60,88,155,214,126,93,229,185,171,
++  76,71,246,98,194,90,185,59,229,117,57,62,105,61,211,168,189,159,177,7,
++  42,55,155,79,246,37,59,157,59,147,142,244,26,209,7,169,254,112,217,173,
++  16,219,98,244,67,219,185,133,238,130,108,29,81,104,181,6,95,150,196,111,
++  159,120,115,44,27,120,119,121,9,239,103,230,251,98,75,66,89,143,175,144,
++  235,72,114,172,4,114,227,178,223,161,209,253,18,88,75,105,136,125,55,45,
++  235,138,226,116,59,76,73,234,62,26,58,138,82,193,117,77,53,190,47,241,
++  230,252,175,74,156,117,163,167,141,126,167,87,234,112,34,13,14,232,205,68,
++  77,137,199,9,247,125,155,125,101,188,235,31,115,80,105,122,149,110,26,141,
++  218,201,214,31,24,39,227,51,97,54,244,186,62,248,203,247,111,175,62,198,
++  242,230,184,78,71,133,66,243,213,22,100,69,192,21,185,208,152,73,37,102,
++  6,236,176,126,88,220,81,39,3,105,7,168,10,94,250,60,245,247,9,92,
++  183,107,120,91,163,246,130,89,159,191,175,186,40,119,163,113,130,145,80,93,
++  31,5,50,77,9,173,149,110,171,198,78,161,108,90,143,71,77,123,177,27,
++  136,243,15,5,241,208,202,182,210,197,50,166,74,199,243,18,215,200,110,229,
++  218,209,193,123,189,63,243,126,111,233,243,99,60,111,61,129,228,164,11,96,
++  47,104,111,62,130,46,177,237,181,16,53,253,197,193,245,216,94,118,109,138,
++  215,213,55,100,247,222,183,67,164,246,78,39,251,254,152,191,37,82,216,189,
++  124,127,32,238,173,253,255,111,145,247,247,141,35,97,223,240,124,45,142,198,
++  157,234,98,2,10,217,187,174,252,56,254,185,41,28,199,46,57,39,201,126,
++  89,175,188,21,9,85,179,147,209,79,116,253,126,50,146,232,111,16,162,36,
++  164,239,53,109,99,112,181,225,134,73,219,194,113,70,139,236,205,58,116,189,
++  194,135,183,251,30,197,247,53,173,237,141,146,31,3,250,15,25,111,65,146,
++  236,194,213,142,29,215,111,55,170,85,75,91,74,161,159,37,0,55,121,212,
++  49,188,13,238,46,166,142,103,36,221,73,220,113,182,180,194,26,211,92,96,
++  254,139,153,217,186,75,233,140,174,246,32,5,20,237,12,141,62,239,217,23,
++  185,58,11,121,81,136,60,38,95,58,43,201,231,3,175,109,71,196,187,141,
++  246,18,254,246,250,219,175,209,223,190,17,191,86,228,198,182,87,57,184,254,
++  104,145,169,173,216,191,222,64,82,232,2,31,170,188,233,99,186,239,47,196,
++  110,198,11,127,13,127,105,95,45,217,254,208,93,255,171,163,221,209,107,110,
++  54,161,125,177,78,59,113,12,252,52,98,2,237,23,98,193,158,82,141,238,
++  251,182,233,88,224,223,194,27,246,253,62,5,237,225,178,250,53,2,238,90,
++  43,85,110,239,49,11,118,236,206,101,123,91,65,134,255,118,71,223,131,220,
++  218,226,76,207,127,122,251,253,119,97,65,255,131,161,71,82,48,88,168,188,
++  20,87,184,115,216,111,166,44,47,57,47,221,117,220,68,107,93,47,100,59,
++  61,116,19,148,149,45,91,222,235,176,128,190,79,57,238,12,15,96,17,187,
++  215,171,14,124,132,92,215,247,17,197,31,246,137,68,245,239,109,21,171,186,
++  87,172,213,223,189,58,118,20,104,8,221,190,61,186,178,213,196,250,212,93,
++  128,186,121,248,128,251,247,46,15,31,70,203,157,180,23,174,99,110,233,40,
++  114,195,75,102,191,96,213,85,97,200,79,223,41,228,54,252,66,19,142,194,
++  99,23,94,123,107,254,143,52,238,232,138,156,237,185,70,15,242,118,75,105,
++  77,170,237,234,146,18,156,146,189,75,191,174,231,158,61,186,235,211,207,249,
++  168,126,223,56,31,249,47,110,70,238,127,218,252,27,36,80,162,192,122,35,
++  0,0,
++};
++static const size_t kevfm_page_firmware_html_len = 3122;
++
++#endif
+diff -ruN -x build -x partitions.csv upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_station.h yoRadio/src/plugins/KevFM/kevfm_station.h
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_station.h	1969-12-31 19:00:00.000000000 -0500
 +++ yoRadio/src/plugins/KevFM/kevfm_station.h	2026-10-25 11:09:43.916104300 -0400
 @@ -0,0 +1,16 @@
@@ -1676,16 +1686,16 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_station.h yo
 +#endif
 +
 +#endif
-diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_version.h yoRadio/src/plugins/KevFM/kevfm_version.h
+diff -ruN -x build -x partitions.csv upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_version.h yoRadio/src/plugins/KevFM/kevfm_version.h
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_version.h	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm_version.h	2026-10-25 22:06:28.477841300 -0400
++++ yoRadio/src/plugins/KevFM/kevfm_version.h	2026-10-25 22:39:27.537509800 -0400
 @@ -0,0 +1,17 @@
 +#ifndef KEVFM_VERSION_H
 +#define KEVFM_VERSION_H
 +
 +/*  KevFM radio firmware version. Bump it for every release published to GitHub: the radio
 +    offers an update when update.json's "version" is higher than this.  */
-+#define KEVFM_VERSION        "0.2.1"
++#define KEVFM_VERSION        "0.3.0"
 +
 +/*  Where "Check for update" looks: the public GitHub repo, read as plain raw files
 +    (the same simple pattern as the Bubs stock ticker). update.json, the .bin and the
@@ -1697,10 +1707,10 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_version.h yo
 +#define KEVFM_UPDATE_WEBDIR    "yoRadio/data/www/"   /* web files' folder in the repo */
 +
 +#endif
-diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_web.cpp yoRadio/src/plugins/KevFM/kevfm_web.cpp
+diff -ruN -x build -x partitions.csv upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_web.cpp yoRadio/src/plugins/KevFM/kevfm_web.cpp
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_web.cpp	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm_web.cpp	2026-10-25 20:58:07.803394900 -0400
-@@ -0,0 +1,307 @@
++++ yoRadio/src/plugins/KevFM/kevfm_web.cpp	2026-10-25 22:29:13.523438700 -0400
+@@ -0,0 +1,326 @@
 +/*
 + * KevFM radio web pages and endpoints (see README.md, "Web pages").
 + *
@@ -1723,6 +1733,7 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_web.cpp yoRa
 +#include "kevfm_station.h"
 +#include "kevfm_ota.h"
 +#include "kevfm_version.h"
++#include "kevfm_pages.h"
 +#include "../../core/options.h"
 +#include "../../core/config.h"
 +#include "../../core/player.h"
@@ -1756,11 +1767,27 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_web.cpp yoRa
 +  out += '"';
 +}
 +
-+static void sendPage(AsyncWebServerRequest *request, const char *path) {
-+  if (!SPIFFS.exists(path)) { handleIndex(request); return; }
-+  AsyncWebServerResponse *r = request->beginResponse(SPIFFS, path, "text/html");
++/* The KevFM pages live in the firmware (kevfm_pages.h, gzipped), so they always match it
++   and an update never has to write them to the radio's small file storage. */
++enum kevfmPage_e { PAGE_PLAYER, PAGE_SETUP, PAGE_FIRMWARE };
++
++static void sendPage(AsyncWebServerRequest *request, kevfmPage_e page) {
++  const uint8_t *data = kevfm_page_kevfm_html;
++  size_t len = kevfm_page_kevfm_html_len;
++  if (page == PAGE_SETUP)    { data = kevfm_page_setup_html;    len = kevfm_page_setup_html_len; }
++  if (page == PAGE_FIRMWARE) { data = kevfm_page_firmware_html; len = kevfm_page_firmware_html_len; }
++  AsyncWebServerResponse *r = request->beginResponse_P(200, "text/html", data, len);
++  r->addHeader("Content-Encoding", "gzip");
 +  r->addHeader("Cache-Control", "no-cache");
 +  request->send(r);
++}
++
++/* Copies of the pages that 0.2.0 kept in storage: no longer used, and storage is tight */
++static void removeOldPageFiles() {
++  static const char *const old[] = {"/www/kevfm.html", "/www/setup.html", "/www/firmware.html"};
++  for (const char *path : old) {
++    if (SPIFFS.exists(path) && SPIFFS.remove(path)) Serial.printf("##[KevFM]#\tremoved old %s from storage\n", path);
++  }
 +}
 +
 +static void sendJson(AsyncWebServerRequest *request, const String &json, int code = 200) {
@@ -1847,6 +1874,8 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_web.cpp yoRa
 +/* main loop: captive DNS and a first scan while in hotspot mode, so the list is ready
 +   by the time a phone opens the page */
 +void kevfmWebLoop() {
++  static bool cleaned = false;
++  if (!cleaned) { cleaned = true; removeOldPageFiles(); }
 +  if (network.status != SOFT_AP) return;
 +  if (!dnsStarted) {
 +    dns.setErrorReplyCode(DNSReplyCode::NoError);
@@ -1861,7 +1890,7 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_web.cpp yoRa
 +static void onRoot(AsyncWebServerRequest *request) {
 +  /* yoRadio's own cases: empty file system (Web Board Uploader) and ?command=value calls */
 +  if (config.emptyFS || request->params() > 0 || request->method() != HTTP_GET) { handleIndex(request); return; }
-+  sendPage(request, network.status == CONNECTED ? "/www/kevfm.html" : "/www/setup.html");
++  sendPage(request, network.status == CONNECTED ? PAGE_PLAYER : PAGE_SETUP);
 +}
 +
 +static void onCaptive(AsyncWebServerRequest *request) {
@@ -1991,8 +2020,8 @@ diff -ruN -x build upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_web.cpp yoRa
 +/* called by the KevFM patch in NetServer::begin(), before yoRadio adds its own "/" */
 +void kevfm_web_begin(AsyncWebServer &server) {
 +  server.on("/", HTTP_ANY, onRoot);
-+  server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, "/www/setup.html"); });
-+  server.on("/firmware", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, "/www/firmware.html"); });
++  server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, PAGE_SETUP); });
++  server.on("/firmware", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, PAGE_FIRMWARE); });
 +  kevfmOtaBegin(server);
 +  server.on("/kevfm/status", HTTP_GET, onStatus);
 +  server.on("/kevfm/set", HTTP_POST, onSet);

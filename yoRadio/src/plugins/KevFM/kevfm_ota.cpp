@@ -29,6 +29,7 @@
 #include <HTTPClient.h>
 #include <Update.h>
 #include <SPIFFS.h>
+#include <errno.h>
 
 enum otaState_e : uint8_t { OTA_IDLE, OTA_CHECKING, OTA_CHECKED, OTA_INSTALLING, OTA_DONE, OTA_FAILED };
 static const char *const kStateName[] = {"idle", "checking", "checked", "installing", "done", "failed"};
@@ -230,7 +231,13 @@ static bool download(const String &url, const char *what, uint32_t expect, bool 
     int n = stream->readBytes((char *)buf, avail > sizeof(buf) ? sizeof(buf) : avail);
     if (n <= 0) { setMsg(OTA_FAILED, "The %s download stopped.", what); failed = true; break; }
     size_t w = toFlash ? Update.write(buf, n) : f.write(buf, n);
-    if (w != (size_t)n) { setMsg(OTA_FAILED, "Writing the %s failed%s.", what, toFlash ? "" : " (radio storage full?)"); failed = true; break; }
+    if (w != (size_t)n) {
+      if (toFlash) setMsg(OTA_FAILED, "Writing the firmware failed (error %u).", Update.getError());
+      else setMsg(OTA_FAILED, "Saving %s failed after %u of %d bytes (wrote %u of %d; storage %u of %u bytes used, errno %d).",
+                  what, (unsigned)written, len, (unsigned)w, n, (unsigned)SPIFFS.usedBytes(), (unsigned)SPIFFS.totalBytes(), errno);
+      failed = true;
+      break;
+    }
     written += w;
     lastData = millis();
     if (toFlash && len > 0) {
@@ -265,7 +272,8 @@ static void doInstall() {
   otaProgress = 0;
   setMsg(OTA_INSTALLING, "Stopping the music for the update...");
   stopStream();
-  Serial.printf("##[KevFM]#\tupdate install: largest free block %u bytes\n", ESP.getMaxAllocHeap());
+  Serial.printf("##[KevFM]#\tupdate install: largest free block %u bytes, storage %u of %u bytes used\n",
+                ESP.getMaxAllocHeap(), (unsigned)SPIFFS.usedBytes(), (unsigned)SPIFFS.totalBytes());
 
   /* web files first, to temporary names; they replace the old ones only if the firmware
      installs too, so pages and firmware stay matched */

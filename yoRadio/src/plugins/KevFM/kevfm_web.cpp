@@ -20,6 +20,7 @@
 #include "kevfm_station.h"
 #include "kevfm_ota.h"
 #include "kevfm_version.h"
+#include "kevfm_pages.h"
 #include "../../core/options.h"
 #include "../../core/config.h"
 #include "../../core/player.h"
@@ -53,11 +54,27 @@ static void jsonEscape(String &out, const char *s) {
   out += '"';
 }
 
-static void sendPage(AsyncWebServerRequest *request, const char *path) {
-  if (!SPIFFS.exists(path)) { handleIndex(request); return; }
-  AsyncWebServerResponse *r = request->beginResponse(SPIFFS, path, "text/html");
+/* The KevFM pages live in the firmware (kevfm_pages.h, gzipped), so they always match it
+   and an update never has to write them to the radio's small file storage. */
+enum kevfmPage_e { PAGE_PLAYER, PAGE_SETUP, PAGE_FIRMWARE };
+
+static void sendPage(AsyncWebServerRequest *request, kevfmPage_e page) {
+  const uint8_t *data = kevfm_page_kevfm_html;
+  size_t len = kevfm_page_kevfm_html_len;
+  if (page == PAGE_SETUP)    { data = kevfm_page_setup_html;    len = kevfm_page_setup_html_len; }
+  if (page == PAGE_FIRMWARE) { data = kevfm_page_firmware_html; len = kevfm_page_firmware_html_len; }
+  AsyncWebServerResponse *r = request->beginResponse_P(200, "text/html", data, len);
+  r->addHeader("Content-Encoding", "gzip");
   r->addHeader("Cache-Control", "no-cache");
   request->send(r);
+}
+
+/* Copies of the pages that 0.2.0 kept in storage: no longer used, and storage is tight */
+static void removeOldPageFiles() {
+  static const char *const old[] = {"/www/kevfm.html", "/www/setup.html", "/www/firmware.html"};
+  for (const char *path : old) {
+    if (SPIFFS.exists(path) && SPIFFS.remove(path)) Serial.printf("##[KevFM]#\tremoved old %s from storage\n", path);
+  }
 }
 
 static void sendJson(AsyncWebServerRequest *request, const String &json, int code = 200) {
@@ -144,6 +161,8 @@ static void collectScan() {
 /* main loop: captive DNS and a first scan while in hotspot mode, so the list is ready
    by the time a phone opens the page */
 void kevfmWebLoop() {
+  static bool cleaned = false;
+  if (!cleaned) { cleaned = true; removeOldPageFiles(); }
   if (network.status != SOFT_AP) return;
   if (!dnsStarted) {
     dns.setErrorReplyCode(DNSReplyCode::NoError);
@@ -158,7 +177,7 @@ void kevfmWebLoop() {
 static void onRoot(AsyncWebServerRequest *request) {
   /* yoRadio's own cases: empty file system (Web Board Uploader) and ?command=value calls */
   if (config.emptyFS || request->params() > 0 || request->method() != HTTP_GET) { handleIndex(request); return; }
-  sendPage(request, network.status == CONNECTED ? "/www/kevfm.html" : "/www/setup.html");
+  sendPage(request, network.status == CONNECTED ? PAGE_PLAYER : PAGE_SETUP);
 }
 
 static void onCaptive(AsyncWebServerRequest *request) {
@@ -288,8 +307,8 @@ static void onForget(AsyncWebServerRequest *request) {
 /* called by the KevFM patch in NetServer::begin(), before yoRadio adds its own "/" */
 void kevfm_web_begin(AsyncWebServer &server) {
   server.on("/", HTTP_ANY, onRoot);
-  server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, "/www/setup.html"); });
-  server.on("/firmware", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, "/www/firmware.html"); });
+  server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, PAGE_SETUP); });
+  server.on("/firmware", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, PAGE_FIRMWARE); });
   kevfmOtaBegin(server);
   server.on("/kevfm/status", HTTP_GET, onStatus);
   server.on("/kevfm/set", HTTP_POST, onSet);

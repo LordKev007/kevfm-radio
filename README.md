@@ -16,7 +16,9 @@ Behaviour spec: `E:\KevinFM\dev\gusi_radio_handwired\firmware_spec.md`.
 | `yoRadio/src/plugins/KevFM/` | the KevFM plugin: sleep timer, status light, power button, KevFM-only, always-play |
 | `yoRadio/src/plugins/KevFM/kevfm_station.h` | **the stream URL** |
 | `yoRadio/src/plugins/KevFM/kevfm_web.cpp` | KevFM web pages' endpoints, Wi-Fi scan, captive portal |
-| `yoRadio/data/www/kevfm.html`, `setup.html`, `kevfm-cover-256.jpg` | KevFM player and Wi-Fi setup pages (listen.html look) |
+| `web/kevfm.html`, `setup.html`, `firmware.html` | KevFM pages (listen.html look). Built INTO the firmware, gzipped, by `tools/embed_web.py` -> `kevfm_pages.h` |
+| `yoRadio/data/www/kevfm-cover-256.jpg` | cover picture (in the radio's file storage) |
+| `yoRadio/partitions.csv` | KevFM flash layout (from 0.3.0): 2 x 1.75 MB app, 384 KB file storage |
 | `yoRadio/data/www/theme.css` | yoRadio's old pages: station list / editor / prev-next hidden |
 | `patches/kevfm-yoradio.patch` | every change to upstream yoRadio files, as one diff |
 | `upstream_yoradio/` | untouched upstream clone at 2fd3e38, for diffing / future merges |
@@ -77,7 +79,11 @@ Behaviour spec: `E:\KevinFM\dev\gusi_radio_handwired\firmware_spec.md`.
 | `GET /kevfm/networks`, `POST /kevfm/wifi`, `POST /kevfm/forget` | saved network names (never passwords), add (restarts), remove |
 | `POST /kevfm/update/check`, `/install`, `/upload`; `GET /kevfm/update/status` | firmware updates (`kevfm_ota.cpp`) |
 
-The KevFM pages are sent with `Cache-Control: no-cache`. yoRadio's old `/` page was sent with
+The KevFM pages are compiled into the firmware (edit `web/*.html`; `build.cmd` runs
+`tools/embed_web.py`), so they always match the firmware and updates never write them to
+the file storage. (0.2.x kept them in storage: 128 KB, effectively full at ~78% because
+SPIFFS keeps blocks in reserve; an OTA page write failed with errno 28. 0.2.2+ deletes those
+old copies at boot.) The KevFM pages are sent with `Cache-Control: no-cache`. yoRadio's old `/` page was sent with
 a one-year cache, so a phone that saw it once may show that stale copy: tap reload once.
 Updating only the pages without erasing Wi-Fi: upload the changed files from `yoRadio/data/www`
 through yoRadio's uploader (http://<radio-ip>/webboard).
@@ -124,7 +130,7 @@ Board settings (already in `build.cmd`; use the same if you build in the IDE):
 | Setting | Value |
 |---|---|
 | Board | ESP32 Dev Module |
-| Partition Scheme | **Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)** |
+| Partition Scheme | from 0.3.0 `yoRadio/partitions.csv` is used automatically (2 x 1.75 MB app, 384 KB SPIFFS at 0x390000); the menu setting is ignored |
 | PSRAM | Disabled |
 | Flash Size / Mode / Freq | 4MB / QIO / 80MHz |
 | CPU Frequency | 240MHz |
@@ -176,6 +182,18 @@ while the radio is in hotspot mode).
 **Boards flashed:** #1 MAC 68:09:47:5f:e3:30 (older firmware, hotspot still plain
 `KevFM-Radio`, on Hyrule); #2 MAC 68:09:47:5f:46:34 (current firmware, hotspot
 `KevFM-Radio-4634`, no Wi-Fi saved yet).
+
+**Flash layout 0.3.0 (2026-10-25 night):** `partitions.csv` built and checked (app0/app1 0x1C0000,
+spiffs 0x390000 + 0x60000, coredump 0x3F0000). Both boards still have the OLD layout until a
+full USB flash (`flash.cmd COMx`, erases saved Wi-Fi, keeps volume/light). 0.3.0 also runs on
+the old layout, so OTA from 0.2.0 to 0.3.0 works before the USB step.
+
+**OTA test 2026-10-25 (board 2, 0.2.0 -> 0.2.1):** Check worked over https while streaming
+(largest free block 55-61 KB). Install failed safely saving kevfm.html to storage (errno 28,
+87,850 of 113,201 bytes used): nothing changed, music resumed. Fixed by moving the pages into
+the firmware (0.2.2) and the bigger file area (0.3.0). Firmware download/write itself not yet
+proven. Also seen: the KevFM stream returned 404 late at night (station off); the radio retried
+every 15 s, now backs off 15 s -> 30 s -> 1 min -> 2 min (0.3.0).
 
 **Firmware updates (0.2.x):** builds; board 2 flashed with 0.2.0 by USB, repo prepared at
 0.2.1. Not yet tested: Check / Install from GitHub (repo not created yet), Upload a file, and

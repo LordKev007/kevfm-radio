@@ -135,15 +135,22 @@ void KevFM::_ensureStation() {
 
 /* 1 Hz, main loop (TimeKeeper::loop1) */
 void KevFM::on_ticker() {
-  /* keep playing: if the stream dropped (server restart, network blip), start it again */
+  /* keep playing: if the stream dropped (server restart, network blip), start it again.
+     The wait doubles after each failed try (15 s, 30 s, 1 min, 2 min max) so a station that
+     is off the air for hours isn't hammered; a minute of playing resets it. */
+  static uint16_t replayWait = KEVFM_REPLAY_SECS;
+  static uint16_t playingSecs = 0;
   if (network.status == CONNECTED && !_fading && !kevfmOtaBusy() && player.status() == STOPPED) {
-    if (++_stoppedSecs >= KEVFM_REPLAY_SECS) {
+    playingSecs = 0;
+    if (++_stoppedSecs >= replayWait) {
       _stoppedSecs = 0;
-      Serial.println("##[KevFM]#\tstream stopped, playing again");
+      Serial.printf("##[KevFM]#\tstream stopped, playing again (next wait %u s)\n", replayWait < 60 ? replayWait * 2 : 120);
+      replayWait = replayWait < 60 ? replayWait * 2 : 120;
       player.sendCommand({PR_PLAY, 1});
     }
   } else {
     _stoppedSecs = 0;
+    if (player.status() == PLAYING && ++playingSecs >= 60) replayWait = KEVFM_REPLAY_SECS;
   }
   /* the sleep timer must still put the radio to sleep if yoRadio has paused loopControls
      (e.g. while the network is lost) */
