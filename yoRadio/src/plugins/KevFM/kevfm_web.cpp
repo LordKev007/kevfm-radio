@@ -4,7 +4,8 @@
  *   /                 KevFM player page (setup page while the radio is in hotspot mode)
  *   /setup            Wi-Fi setup page (scan list + type it in), also reachable when connected
  *   /firmware         version, check GitHub for an update, upload a .bin (kevfm_ota.cpp)
- *   /settings.html    yoRadio's own pages, kept for Kevin
+ *   /settings         KevFM Settings: radio name, knob, tone, restart, factory reset (kevfm_settings.cpp)
+ *   /settings.html    yoRadio's own pages: not linked anywhere, kept for Kevin (type the address)
  *   GET  /kevfm/status    now playing, volume, sleep timer, light, Wi-Fi
  *   POST /kevfm/set       volume=0..254 | sleep=0/10/15/30/60 | light=0..2
  *   GET  /kevfm/scan      Wi-Fi networks nearby (starts a scan; ?refresh=1 rescans)
@@ -19,6 +20,7 @@
 #include "kevfm.h"
 #include "kevfm_station.h"
 #include "kevfm_ota.h"
+#include "kevfm_settings.h"
 #include "kevfm_version.h"
 #include "kevfm_pages.h"
 #include "../../core/options.h"
@@ -56,13 +58,14 @@ static void jsonEscape(String &out, const char *s) {
 
 /* The KevFM pages live in the firmware (kevfm_pages.h, gzipped), so they always match it
    and an update never has to write them to the radio's small file storage. */
-enum kevfmPage_e { PAGE_PLAYER, PAGE_SETUP, PAGE_FIRMWARE };
+enum kevfmPage_e { PAGE_PLAYER, PAGE_SETUP, PAGE_FIRMWARE, PAGE_SETTINGS };
 
 static void sendPage(AsyncWebServerRequest *request, kevfmPage_e page) {
   const uint8_t *data = kevfm_page_kevfm_html;
   size_t len = kevfm_page_kevfm_html_len;
   if (page == PAGE_SETUP)    { data = kevfm_page_setup_html;    len = kevfm_page_setup_html_len; }
   if (page == PAGE_FIRMWARE) { data = kevfm_page_firmware_html; len = kevfm_page_firmware_html_len; }
+  if (page == PAGE_SETTINGS) { data = kevfm_page_settings_html; len = kevfm_page_settings_html_len; }
   AsyncWebServerResponse *r = request->beginResponse_P(200, "text/html", data, len);
   r->addHeader("Content-Encoding", "gzip");
   r->addHeader("Cache-Control", "no-cache");
@@ -309,7 +312,9 @@ void kevfm_web_begin(AsyncWebServer &server) {
   server.on("/", HTTP_ANY, onRoot);
   server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, PAGE_SETUP); });
   server.on("/firmware", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, PAGE_FIRMWARE); });
+  server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, PAGE_SETTINGS); });
   kevfmOtaBegin(server);
+  kevfmSettingsBegin(server);
   server.on("/kevfm/status", HTTP_GET, onStatus);
   server.on("/kevfm/set", HTTP_POST, onSet);
   server.on("/kevfm/scan", HTTP_GET, onScan);

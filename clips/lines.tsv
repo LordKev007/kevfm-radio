@@ -1,0 +1,24 @@
+sleep_10	Sleep timer, ten minutes.
+sleep_15	Sleep timer, fifteen minutes.
+sleep_30	Sleep timer, thirty minutes.
+sleep_60	Sleep timer, one hour.
+sleep_off	Sleep timer off.
+left_5	About five minutes left.
+left_10	About ten minutes left.
+left_15	About fifteen minutes left.
+left_20	About twenty minutes left.
+left_25	About twenty-five minutes left.
+left_30	About thirty minutes left.
+left_35	About thirty-five minutes left.
+left_40	About forty minutes left.
+left_45	About forty-five minutes left.
+left_50	About fifty minutes left.
+left_55	About fifty-five minutes left.
+left_60	About an hour left.
+left_soon	Almost time for bed.
+light_touch	Light comes on when you touch the radio.
+light_on	Light always on.
+light_off	Light off.
+goodnight	Goodnight from The Mighty KevFM.
+wifi_setup	I need Wi-Fi. Ask Kevin to set me up.
+station_off	KevFM is taking a break. I'll keep trying.

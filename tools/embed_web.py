@@ -14,7 +14,7 @@ import pathlib
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 OUT = ROOT / "yoRadio" / "src" / "plugins" / "KevFM" / "kevfm_pages.h"
-PAGES = ["kevfm.html", "setup.html", "firmware.html"]
+PAGES = ["kevfm.html", "setup.html", "firmware.html", "settings.html"]
 
 
 def main():

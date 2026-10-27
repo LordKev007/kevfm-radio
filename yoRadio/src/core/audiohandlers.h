@@ -104,7 +104,10 @@ void audio_id3data(const char *info){  //id3 metadata
     telnet.printf("##AUDIO.ID3#: %s\n", info);
 }
 
+/* ==== KevFM patch: a KevFM spoken clip ended; the plugin decides what comes next ==== */
+extern __attribute__((weak)) bool kevfm_clip_eof();
 void audio_eof_mp3(const char *info){  //end of file
+    if (kevfm_clip_eof && kevfm_clip_eof()) return;   /* KevFM patch */
     config.sdResumePos = 0;
     player.next();
 }

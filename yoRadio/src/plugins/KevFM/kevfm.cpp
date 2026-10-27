@@ -4,6 +4,7 @@
 #include "kevfm.h"
 #include "kevfm_station.h"
 #include "kevfm_ota.h"
+#include "kevfm_settings.h"
 #include "kevfm_version.h"
 #include "../../core/options.h"
 #include "../../core/config.h"
@@ -36,11 +37,12 @@ static const uint32_t KEVFM_REPLAY_SECS   = 15;    /* stream stopped this long -
 static const uint8_t  KEVFM_LED_BITS      = 12;
 static const uint32_t KEVFM_LED_FREQ      = 5000;
 
-static const char* const kClipText[] = {
-  "Sleep timer, ten minutes", "Sleep timer, fifteen minutes", "Sleep timer, thirty minutes",
-  "Sleep timer, sixty minutes", "Sleep timer off", "minutes left",
-  "Light: when touched", "Light on", "Light off"
+static const char* const kClipFile[] = {           /* /clips/<name>.mp3, same order as kevfmClip_e */
+  "sleep_10", "sleep_15", "sleep_30", "sleep_60", "sleep_off", "left_",
+  "light_touch", "light_on", "light_off", "goodnight", "wifi_setup", "station_off"
 };
+static const uint32_t KEVFM_CLIP_MAX_MS    = 10000; /* a clip that hasn't ended by then is stopped */
+static const uint8_t  KEVFM_SETUP_CLIP_VOL = 60;    /* "I need Wi-Fi" is at least this loud (of 254) */
 
 static inline bool reached(uint32_t now, uint32_t when) { return (int32_t)(now - when) >= 0; }
 
@@ -104,7 +106,7 @@ void KevFM::on_setup() {
   _touch();                                       /* glow at power-on, like the original GuSi */
 }
 
-void KevFM::on_connect() { _ensureStation(); }
+void KevFM::on_connect() { _ensureStation(); kevfmFixDefaultName(); }
 
 void KevFM::on_end_setup() {
   /* KevFM always plays when awake. yoRadio already sent PLAY if smartstart==1. */
@@ -140,18 +142,28 @@ void KevFM::on_ticker() {
      is off the air for hours isn't hammered; a minute of playing resets it. */
   static uint16_t replayWait = KEVFM_REPLAY_SECS;
   static uint16_t playingSecs = 0;
-  if (network.status == CONNECTED && !_fading && !kevfmOtaBusy() && player.status() == STOPPED) {
+  if (network.status == CONNECTED && !_fading && !_clipPlaying && !kevfmOtaBusy() && player.status() == STOPPED) {
     playingSecs = 0;
     if (++_stoppedSecs >= replayWait) {
       _stoppedSecs = 0;
-      Serial.printf("##[KevFM]#\tstream stopped, playing again (next wait %u s)\n", replayWait < 60 ? replayWait * 2 : 120);
       replayWait = replayWait < 60 ? replayWait * 2 : 120;
-      player.sendCommand({PR_PLAY, 1});
+      if (++_failedTries == 2 && !_stationOffSaid) {
+        /* the station has been unreachable for ~45 s: say so once, instead of this retry */
+        _stationOffSaid = true;
+        _say(CLIP_STATION_OFF);
+      } else {
+        Serial.printf("##[KevFM]#\tstream stopped, playing again (next wait %u s)\n", replayWait);
+        player.sendCommand({PR_PLAY, 1});
+      }
     }
   } else {
     _stoppedSecs = 0;
-    if (player.status() == PLAYING && ++playingSecs >= 60) replayWait = KEVFM_REPLAY_SECS;
+    if (player.status() == PLAYING && ++playingSecs >= 60) {
+      replayWait = KEVFM_REPLAY_SECS; _failedTries = 0; _stationOffSaid = false;
+    }
   }
+  /* setup hotspot (no Wi-Fi): say so a few seconds after it starts */
+  if (network.status == SOFT_AP) { if (++_apSecs == 5) _say(CLIP_WIFI_SETUP); } else _apSecs = 0;
   /* the sleep timer must still put the radio to sleep if yoRadio has paused loopControls
      (e.g. while the network is lost) */
   if (_timerRunning() && reached(millis(), _timerEndMs + 2 * KEVFM_TIMER_FADE_MS)) {
@@ -162,6 +174,7 @@ void KevFM::on_ticker() {
 
 /* every main-loop pass (ctrls_on_loop) */
 void KevFM::loop() {
+  _clipLoop();
   _webLoop();
   _sleepBtnLoop();
   _timerLoop();
@@ -178,6 +191,7 @@ void KevFM::onTurn() {
   _lastTurnMs = millis();
   _touch();
   if (_fading && _fadeCancelable) _cancelFade();          /* turning the knob cancels a timer fade */
+  if (_clipPlaying && _clipSleepAfter) { _clipSleepAfter = false; _clipResume = true; }   /* ...or the goodnight */
 }
 
 /* Called by the KevFM patch in controls.cpp before yoRadio handles a button.
@@ -227,6 +241,7 @@ void KevFM::_sleepBtnLoop() {
 void KevFM::_sleepBtnShort() {
   uint32_t now = millis();
   if (_fading && _fadeCancelable) _cancelFade();    /* a press during the timer fade keeps the radio on */
+  if (_clipPlaying && _clipSleepAfter) { _clipSleepAfter = false; _clipResume = true; }
   _timerIdx = (_timerIdx + 1) % sizeof(kSleepSteps);
   if (_timerIdx) _timerEndMs = now + (uint32_t)kSleepSteps[_timerIdx] * 60000UL;
   _coalesceUntil = now + KEVFM_COALESCE_MS;          /* announce only the final setting */
@@ -239,7 +254,8 @@ void KevFM::_sleepBtnLong() {
   if (!_timerRunning()) { _say(CLIP_SLEEP_OFF); return; }
   uint32_t left = _timerEndMs - millis();
   if ((int32_t)left < 0) left = 0;
-  _say(CLIP_TIME_LEFT, (uint16_t)((left + 59999UL) / 60000UL));
+  uint16_t five = (uint16_t)((left + 299999UL) / 300000UL) * 5;   /* "about": rounded up to 5 minutes */
+  _say(CLIP_TIME_LEFT, left < 60000UL ? 0 : (five > 60 ? 60 : five));
 }
 
 void KevFM::_timerLoop() {
@@ -285,6 +301,10 @@ void KevFM::_fadeLoop() {
   }
   player.setVolume(0);
   if (_powerHeld || digitalRead(KEVFM_PIN_POWER) == LOW) return;   /* wait for release, or it wakes at once */
+  if (_fadeCancelable) {                            /* the sleep timer (not the power button): say goodnight first */
+    _fading = false;
+    if (_playClip(kClipFile[CLIP_GOODNIGHT], true)) return;   /* _clipLoop sleeps when it ends */
+  }
   _deepSleepNow();
 }
 
@@ -303,6 +323,55 @@ void KevFM::_deepSleepNow() {
   rtc_gpio_pulldown_dis((gpio_num_t)KEVFM_PIN_POWER);
   Serial.flush();
   esp_deep_sleep_start();
+}
+
+/* ---------------------------------------------------------------- spoken clips
+   A clip stops the stream, plays /clips/<name>.mp3 from the file storage through the same
+   audio path, then starts the stream again (a few seconds to reconnect). A newer clip
+   replaces one still playing. yoRadio's end-of-file handler would jump to the "next track";
+   the KevFM patch in audiohandlers.h hands the end of a clip back here instead. */
+bool kevfm_clip_eof() { return kevfm.clipBusy(); }
+
+bool KevFM::_playClip(const char *name, bool sleepAfter) {
+  if (kevfmOtaBusy()) return false;
+  char path[32];
+  snprintf(path, sizeof(path), "/clips/%s.mp3", name);
+  if (!SPIFFS.exists(path)) { Serial.printf("##[KevFM]#\tno clip %s (light only)\n", path); return false; }
+  if (_clipPlaying) {
+    player.stopSong();                              /* replace the clip still playing */
+  } else {
+    _clipResume = player.status() == PLAYING;       /* stream was on (or connecting): back on afterwards */
+  }
+  if (player.status() == PLAYING) { player.sendCommand({PR_STOP, 0}); player.loop(); }
+  uint8_t vol = player.volToI2S(config.store.volume);
+  if (sleepAfter) vol = _fadeFromVol;               /* the music was just faded to 0: goodnight at its old level */
+  if (network.status == SOFT_AP && vol < KEVFM_SETUP_CLIP_VOL) vol = KEVFM_SETUP_CLIP_VOL;
+  player.setVolume(vol);
+  if (!player.connecttoFS(SPIFFS, path)) {
+    Serial.printf("##[KevFM]#\tclip %s would not play\n", path);
+    if (_clipResume) player.sendCommand({PR_PLAY, 1});
+    _clipResume = false;
+    return false;
+  }
+  _clipPlaying = true;
+  _clipSleepAfter = sleepAfter;
+  _clipStartMs = millis();
+  return true;
+}
+
+void KevFM::_clipLoop() {
+  if (!_clipPlaying) return;
+  /* yoRadio only runs the audio loop while connected; in setup-hotspot mode run it here */
+  if (network.status != CONNECTED && network.status != SDREADY) player.Audio::loop();
+  uint32_t el = millis() - _clipStartMs;
+  if (el < 200 || (player.isRunning() && el < KEVFM_CLIP_MAX_MS)) return;
+  bool cut = player.isRunning();
+  if (cut) player.stopSong();
+  _clipPlaying = false;
+  Serial.printf("##[KevFM]#\tclip %s after %u ms\n", cut ? "STOPPED (too long)" : "ended", (unsigned)el);
+  if (_clipSleepAfter) { _clipSleepAfter = false; _deepSleepNow(); return; }
+  if (_clipResume) player.sendCommand({PR_PLAY, 1});
+  _clipResume = false;
 }
 
 /* ---------------------------------------------------------------- status light */
@@ -354,14 +423,28 @@ void KevFM::_webLoop() {
   }
   kevfmWebLoop();
   kevfmOtaLoop();
+  kevfmSettingsLoop();
 }
 
-/* Spoken clips are a later phase (voice not chosen). Until then the light answers instead:
-   1-4 short blinks = 10/15/30/60 min, one long blink = off; light mode: 1 blink = when touched,
-   2 = always on, long = off; time left: one blink per started 10 minutes. */
+/* Speak a clip and answer with the light too: 1-4 short blinks = 10/15/30/60 min, one long
+   blink = off; light mode: 1 blink = when touched, 2 = always on, long = off; time left: one
+   blink per started 10 minutes. In setup-hotspot mode every press says "I need Wi-Fi". */
 void KevFM::_say(kevfmClip_e clip, uint16_t minutes) {
-  if (clip == CLIP_TIME_LEFT) Serial.printf("##[KevFM]#\tsay: %u %s\n", minutes, kClipText[clip]);
-  else Serial.printf("##[KevFM]#\tsay: %s\n", kClipText[clip]);
+  if (network.status == SOFT_AP && clip != CLIP_WIFI_SETUP) {
+    if (millis() - _lastWifiSayMs > 6000) _say(CLIP_WIFI_SETUP);
+  } else {
+    char name[16];
+    if (clip == CLIP_TIME_LEFT) {
+      if (minutes == 0) strlcpy(name, "left_soon", sizeof(name));
+      else snprintf(name, sizeof(name), "left_%u", minutes);
+    } else {
+      strlcpy(name, kClipFile[clip], sizeof(name));
+    }
+    if (clip == CLIP_WIFI_SETUP) _lastWifiSayMs = millis();
+    Serial.printf("##[KevFM]#\tsay: %s\n", name);
+    _playClip(name);
+  }
+  if (clip == CLIP_GOODNIGHT || clip == CLIP_WIFI_SETUP || clip == CLIP_STATION_OFF) return;   /* voice only */
   uint8_t n = 1; bool lng = false;
   switch (clip) {
     case CLIP_SLEEP_10: n = 1; break;
@@ -373,6 +456,7 @@ void KevFM::_say(kevfmClip_e clip, uint16_t minutes) {
     case CLIP_LIGHT_ON: n = 2; break;
     case CLIP_SLEEP_OFF:
     case CLIP_LIGHT_OFF: n = 1; lng = true; break;
+    default: break;
   }
   _blinkLeft = n; _blinkLong = lng; _blinkOn = false;
   _blinkNextMs = millis() + 300;                    /* short dark gap so the blinks stand out */

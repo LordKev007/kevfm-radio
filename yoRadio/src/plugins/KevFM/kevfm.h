@@ -21,12 +21,13 @@
 #define KEVFM_PIN_LED               2   /* -> 220R -> LED -> D19   */
 #define KEVFM_PIN_POWER             4   /* power/wake, real GND (yoRadio BTN_MODE / WAKE_PIN) */
 
-/*  Things a listener should hear. Until the clips exist (voice not chosen yet) each one is
-    shown as a blink pattern on the status light instead.  */
+/*  Things the radio says: a spoken clip from /clips/<name>.mp3 in its file storage, plus a
+    blink pattern on the status light (also the fallback if a clip file is missing).  */
 enum kevfmClip_e : uint8_t {
   CLIP_SLEEP_10, CLIP_SLEEP_15, CLIP_SLEEP_30, CLIP_SLEEP_60, CLIP_SLEEP_OFF,
-  CLIP_TIME_LEFT,                   /* "Twenty-two minutes left" (minutes passed separately) */
-  CLIP_LIGHT_TOUCHED, CLIP_LIGHT_ON, CLIP_LIGHT_OFF
+  CLIP_TIME_LEFT,                   /* "About twenty-five minutes left": minutes passed separately, 0 = under a minute */
+  CLIP_LIGHT_TOUCHED, CLIP_LIGHT_ON, CLIP_LIGHT_OFF,
+  CLIP_GOODNIGHT, CLIP_WIFI_SETUP, CLIP_STATION_OFF
 };
 
 enum kevfmLight_e : uint8_t { LIGHT_TOUCHED = 0, LIGHT_ALWAYS = 1, LIGHT_OFF = 2 };
@@ -43,6 +44,7 @@ public:
   /*  Called from the main loop (ctrls_on_loop) and from the controls.cpp patch  */
   void loop();
   bool btnEvent(int id, uint8_t kind);
+  bool clipBusy() const { return _clipPlaying; }   /* also answers the KevFM patch in audiohandlers.h */
   void onTurn();
 
   /*  Web page (kevfm_web.cpp). Requests arrive on the web server's task, so they only leave
@@ -83,6 +85,15 @@ private:
   bool     _powerHeld = false;
   /* keep playing */
   uint16_t _stoppedSecs = 0;
+  uint8_t  _failedTries = 0;           /* stream retries without a minute of playing */
+  bool     _stationOffSaid = false;
+  /* spoken clips */
+  bool     _clipPlaying = false;
+  bool     _clipResume = false;        /* start the stream again after the clip */
+  bool     _clipSleepAfter = false;    /* "Goodnight": deep sleep after the clip */
+  uint32_t _clipStartMs = 0;
+  uint32_t _lastWifiSayMs = 0;
+  uint16_t _apSecs = 0;
 
   void _touch();
   void _sleepBtnLoop();
@@ -91,6 +102,8 @@ private:
   void _timerLoop();
   void _ledLoop();
   void _say(kevfmClip_e clip, uint16_t minutes = 0);
+  bool _playClip(const char *name, bool sleepAfter = false);
+  void _clipLoop();
   void _cycleLight();
   void _startFadeToSleep(uint32_t fadeMs, bool cancelable);
   void _cancelFade();

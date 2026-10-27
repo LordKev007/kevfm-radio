@@ -5,3 +5,8 @@ yoRadio/build/
 # untouched upstream clone, kept locally for diffing; upstream lives at github.com/e2002/yoradio
 upstream_yoradio/
 __pycache__/
+
+# clip rendering scratch (takes, reference); finished clips live in clips/
+clips_work/
+clips/takes/
+clips/index.html

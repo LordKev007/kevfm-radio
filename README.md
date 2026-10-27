@@ -70,9 +70,10 @@ Behaviour spec: `E:\KevinFM\dev\gusi_radio_handwired\firmware_spec.md`.
 | Address | Page |
 |---|---|
 | `/` | KevFM player: cover, now playing, volume, sleep timer, light mode, Wi-Fi signal (setup page while in hotspot mode) |
+| `/settings` | KevFM Settings: radio name (`<name>.local`), knob step and speed-up, bass/middle/treble, restart, factory settings (keeps Wi-Fi) |
 | `/setup` | Wi-Fi setup: scan list, type-it-in, saved networks with Forget |
 | `/firmware` | version, Check for update (GitHub), Install, or upload a `.bin` file |
-| `/settings.html` | yoRadio's own settings pages ("Advanced" link), kept for Kevin |
+| `/settings.html` | yoRadio's own settings pages: not linked from any KevFM page (almost nothing there applies to a radio with no screen, remote or station list); type the address if ever needed |
 | `GET /kevfm/status` | JSON: station, title, playing, volume, sleep, left, light, ssid, rssi, ip |
 | `POST /kevfm/set` | `volume=0..254`, `sleep=0/10/15/30/60`, `light=0..2` |
 | `GET /kevfm/scan` | nearby networks (`?refresh=1` rescans) |
@@ -179,9 +180,9 @@ Note: Kevin's PC (192.168.4.x) can't reach Hyrule's 192.168.5.x addresses; the i
 The radio's setup hotspot also uses 192.168.4.1, the same as Kevin's router (only matters
 while the radio is in hotspot mode).
 
-**Boards flashed:** #1 MAC 68:09:47:5f:e3:30 (older firmware, hotspot still plain
-`KevFM-Radio`, on Hyrule); #2 MAC 68:09:47:5f:46:34 (current firmware, hotspot
-`KevFM-Radio-4634`, no Wi-Fi saved yet).
+**Boards flashed:** both on 0.3.0 with the new 384 KB layout (full USB flash 2026-10-26).
+#1 MAC 68:09:47:5f:e3:30, hotspot `KevFM-Radio-E330`; #2 MAC 68:09:47:5f:46:34, hotspot
+`KevFM-Radio-4634`. Wi-Fi to be re-entered on each after the flash.
 
 **Flash layout 0.3.0 (2026-10-25 night):** `partitions.csv` built and checked (app0/app1 0x1C0000,
 spiffs 0x390000 + 0x60000, coredump 0x3F0000). Both boards still have the OLD layout until a
@@ -211,9 +212,42 @@ stream if the largest free block is under 45 KB; the serial log prints it).
 Known yoRadio defaults worth knowing: first-boot volume is low (12 of 254), so turn it up and
 let it save; the power button's hold time is yoRadio's 500 ms long-press.
 
+## Settings page (0.4.0, 2026-10-26)
+
+`web/settings.html` + `kevfm_settings.cpp`. Radio name defaults to `kevfm-xxxx` (matches the
+hotspot) instead of yoRadio's `yoradio-<chipid>`. Every change and every startup prints one
+`##[KevFM]# settings (...)` line on the USB log (name, volume, knob, tone, light).
+yoRadio bug found and worked around: `Config::setTone()` writes bass/middle without committing
+and skips the treble save (the one that commits) when treble is unchanged, so bass/middle-only
+changes were lost at restart; `kevfm_settings.cpp` commits after setTone. Tested on board 1:
+bass +1 survived a restart; Restart button works.
+
+## Spoken clips (made 2026-10-26, approved by Kevin; played by the radio from 0.4.0)
+
+Clip player (0.4.0, `kevfm.cpp` `_playClip` / `_clipLoop`, plus a marked patch in
+`core/audiohandlers.h` so the end of a clip doesn't trigger yoRadio's "next track"): stops the
+stream, plays `/clips/<name>.mp3` from storage, then reconnects the stream. Tested on board 1
+2026-10-26 (log only, no amp yet): wifi_setup in hotspot mode ended after 2.9 s; from the phone
+page light_on 1.5 s, light_off 1.2 s, sleep_60 2.0 s, sleep_off 1.6 s, each followed by the
+stream reconnecting by itself. Not yet tried: hearing them (amp), time-left (sleep button),
+goodnight before sleep (timer running out), station_off (stream down ~45 s).
+
+24 clips in `clips/*.mp3` (196 KB: mono 32 kbps / 22 kHz, -16 LUFS target, peaks <= -1.5 dB),
+lines in `clips/lines.tsv`, chosen takes in `clips/choices.json`. Voice: Kevin's ElevenLabs
+"Computer Voice" sample (`clips_work/reference.mp3`, reading the test script word for word),
+cloned with local Qwen3-TTS 0.6B-Base (same "steady" settings as the station's calm lines).
+
+Remake or add a line: add it to `clips_work/lines.tsv`, then
+`E:\KevinFM\LocalTTS\qwen-env\Scripts\python.exe -X utf8 tools\render_clips.py --takes 3`
+and `tools\finish_clips.py` (picks a take that ends cleanly, is a normal length and is
+closest in pitch to the reference; `clips_work/choices.json` overrides), then listen on
+`clips/index.html`. Lessons: Qwen cuts about half of short takes off mid-sound, so takes are
+checked for a clean ending; a fixed -45 dBFS silence trim cut the final "s" of "minutes",
+so trimming is relative to each take's peak.
+
 ## Later phases (not built yet)
 
-1. **Spoken clips** (voice not chosen: Venus, Fever or neutral). ~2 s MP3 clips for the sleep
+1. **Spoken clips player** (clips are made, see above). ~2 s MP3 clips for the sleep
    timer, time left and light modes. Design: `KevFM::_say()` is already the single place every
    announcement goes through; the clip player needs a player patch (stop the stream, play the
    clip from flash with `connecttoFS`, catch end-of-file, restart the stream). Flash room:
