@@ -55,6 +55,10 @@ Behaviour spec: `E:\KevinFM\dev\gusi_radio_handwired\firmware_spec.md`.
   about holding it"); holding works too. A tap wakes it. Ignored for 4 s after start-up so the
   waking tap can't switch it straight back off.
 - **Knob direction** (0.4.1): yoRadio's encoder pins are given as L = D33, R = D32 so clockwise = louder.
+- **Knob step** (0.4.2): each click = "volume step" (Settings page, default 4 of 254, set once per
+  radio and after Factory settings); turning fast multiplies it (yoRadio's speed-up, 200). yoRadio
+  ignored the step for the knob on screenless radios and wrapped its count at 254 (a volume jump
+  from loud to silent after a long turn); both patched in controls.cpp.
 - **Status light**: breathes slowly while the sleep timer runs (modes "touched" and "always on").
 - **Announcements**: the spoken clips are a later phase. Until then the light answers:
   - sleep timer: 1 / 2 / 3 / 4 short blinks = 10 / 15 / 30 / 60 min, one long blink = off
@@ -198,6 +202,9 @@ the old layout, so OTA from 0.2.0 to 0.3.0 works before the USB step.
 the firmware (0.2.2) and the bigger file area (0.3.0). Firmware download/write itself not yet
 proven. Also seen: the KevFM stream returned 404 late at night (station off); the radio retried
 every 15 s, now backs off 15 s -> 30 s -> 1 min -> 2 min (0.3.0).
+
+**First successful over-the-air update (2026-10-27):** radio 1, assembled and on its charger,
+installed 0.4.1 from GitHub with Check for update -> Install ("installed quickly").
 
 **Firmware updates (0.2.x):** builds; board 2 flashed with 0.2.0 by USB, repo prepared at
 0.2.1. Not yet tested: Check / Install from GitHub (repo not created yet), Upload a file, and

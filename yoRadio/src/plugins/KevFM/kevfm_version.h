@@ -3,7 +3,7 @@
 
 /*  KevFM radio firmware version. Bump it for every release published to GitHub: the radio
     offers an update when update.json's "version" is higher than this.  */
-#define KEVFM_VERSION        "0.4.1"
+#define KEVFM_VERSION        "0.4.2"
 
 /*  Where "Check for update" looks: the public GitHub repo, read as plain raw files
     (the same simple pattern as the Bubs stock ticker). update.json, the .bin and the

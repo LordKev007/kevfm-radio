@@ -90,7 +90,10 @@ void initControls() {
 #if ENC_BTNL!=255
   encoder.begin();
   encoder.setup(readEncoderISR);
-  encoder.setBoundaries(0, 254, true);
+  /* KevFM patch: the count is only used as a difference, and a count that wraps from 254 to 0
+     made one turn jump the volume from loud to silent */
+  if (kevfm_on_turn) encoder.setBoundaries(-1000000, 1000000, false);
+  else encoder.setBoundaries(0, 254, true);
   encoder.setAcceleration(config.store.encacc);
 #endif
 #if ENC2_BTNL!=255
@@ -176,7 +179,8 @@ void encodersLoop(yoEncoder *enc, bool first){
        (upstream: next/prev station) */
     if (!kevfm_on_turn) first = first?(first && encBtnState):(!encBtnState);
     if(first){
-      int nv = config.store.volume+encoderDelta;
+      /* KevFM patch: each click moves "volume step" (Settings page; yoRadio ignored it here) */
+      int nv = config.store.volume + encoderDelta * (kevfm_on_turn && config.store.volsteps > 0 ? config.store.volsteps : 1);
       if(nv<0) nv=0;
       if(nv>254) nv=254;
       player.setVol((uint8_t)nv);  

@@ -27,6 +27,7 @@ static const uint32_t KEVFM_LONGPRESS_MS  = 800;   /* sleep button: hold this lo
 static const uint32_t KEVFM_DEBOUNCE_MS   = 30;
 static const uint32_t KEVFM_TIMER_FADE_MS = 6000;  /* sleep timer reached zero: music fades down  */
 static const uint32_t KEVFM_POWER_FADE_MS = 800;   /* power button held: quick fade               */
+static const uint8_t  KEVFM_DEFAULT_VOLSTEP = 4;    /* volume per knob click, of 254 (speed-up multiplies it) */
 static const uint32_t KEVFM_POWER_IGNORE_MS = 4000; /* power button ignored this long after start-up */
 static const uint32_t KEVFM_TOUCH_GLOW_MS = 10000; /* "glow when touched": stays lit this long    */
 static const uint32_t KEVFM_FADE_IN_MS    = 300;
@@ -99,6 +100,15 @@ void KevFM::on_setup() {
   if (p.begin("kevfm", true)) {
     uint8_t m = p.getUChar("light", LIGHT_TOUCHED);
     _lightMode = m <= LIGHT_OFF ? (kevfmLight_e)m : LIGHT_TOUCHED;
+    p.end();
+  }
+  /* The knob's step defaults to 4 of 254 (about 1.6 % a click; yoRadio's 1 needed a dozen turns
+     from silent to full). Once per radio, and again after Factory settings (which clears this). */
+  if (p.begin("kevfm", false)) {
+    if (!p.getBool("volstep", false)) {
+      p.putBool("volstep", true);
+      _setDefaultStep = true;                       /* config isn't loaded yet: done in on_connect / loop */
+    }
     p.end();
   }
   ledcAttach(KEVFM_PIN_LED, KEVFM_LED_FREQ, KEVFM_LED_BITS);
@@ -175,6 +185,11 @@ void KevFM::on_ticker() {
 
 /* every main-loop pass (ctrls_on_loop) */
 void KevFM::loop() {
+  if (_setDefaultStep) {
+    _setDefaultStep = false;
+    config.saveValue(&config.store.volsteps, (uint8_t)KEVFM_DEFAULT_VOLSTEP);
+    Serial.printf("##[KevFM]#\tknob step set to %u\n", KEVFM_DEFAULT_VOLSTEP);
+  }
   _clipLoop();
   _webLoop();
   _sleepBtnLoop();

@@ -94,6 +94,7 @@ private:
   uint32_t _clipStartMs = 0;
   uint32_t _lastWifiSayMs = 0;
   uint16_t _apSecs = 0;
+  bool     _setDefaultStep = false;     /* first boot of 0.4.2+: knob step to 4 */
 
   void _touch();
   void _sleepBtnLoop();
