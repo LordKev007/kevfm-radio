@@ -44,7 +44,8 @@ public:
   /*  Called from the main loop (ctrls_on_loop) and from the controls.cpp patch  */
   void loop();
   bool btnEvent(int id, uint8_t kind);
-  bool clipBusy() const { return _clipPlaying; }   /* also answers the KevFM patch in audiohandlers.h */
+  bool clipBusy() const { return _clipPlaying; }
+  void speakNow(const char *name);     /* play a clip to the end, then leave the stream stopped (updates) */   /* also answers the KevFM patch in audiohandlers.h */
   void onTurn();
 
   /*  Web page (kevfm_web.cpp). Requests arrive on the web server's task, so they only leave

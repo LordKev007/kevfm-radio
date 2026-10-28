@@ -271,6 +271,7 @@ static void doInstall() {
   if (WiFi.status() != WL_CONNECTED) { setMsg(OTA_FAILED, "The radio is not connected to the Internet."); return; }
   otaProgress = 0;
   setMsg(OTA_INSTALLING, "Stopping the music for the update...");
+  kevfm.speakNow("update_start");                   /* "Updating the radio. Please don't unplug me." */
   stopStream();
   Serial.printf("##[KevFM]#\tupdate install: largest free block %u bytes, storage %u of %u bytes used\n",
                 ESP.getMaxAllocHeap(), (unsigned)SPIFFS.usedBytes(), (unsigned)SPIFFS.totalBytes());
@@ -282,6 +283,7 @@ static void doInstall() {
     String tmp = "/www/" + webFiles[i] + ".new";
     if (!download(String(KEVFM_UPDATE_BASE) + KEVFM_UPDATE_WEBDIR + webFiles[i], webFiles[i].c_str(), 0, false, tmp.c_str())) {
       for (uint8_t j = 0; j <= i; j++) SPIFFS.remove("/www/" + webFiles[j] + ".new");
+      kevfm.speakNow("update_failed");              /* "The update didn't work. I'll keep playing." */
       player.sendCommand({PR_PLAY, 1});
       return;
     }
@@ -289,6 +291,7 @@ static void doInstall() {
   setMsg(OTA_INSTALLING, "Downloading firmware %s...", ver);
   if (!download(String(KEVFM_UPDATE_BASE) + file, "firmware", size, true, nullptr)) {
     for (uint8_t j = 0; j < webCount; j++) SPIFFS.remove("/www/" + webFiles[j] + ".new");
+    kevfm.speakNow("update_failed");
     player.sendCommand({PR_PLAY, 1});
     return;
   }

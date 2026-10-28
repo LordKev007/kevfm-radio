@@ -242,7 +242,8 @@ page light_on 1.5 s, light_off 1.2 s, sleep_60 2.0 s, sleep_off 1.6 s, each foll
 stream reconnecting by itself. Not yet tried: hearing them (amp), time-left (sleep button),
 goodnight before sleep (timer running out), station_off (stream down ~45 s).
 
-24 clips in `clips/*.mp3` (196 KB: mono 32 kbps / 22 kHz, -16 LUFS target, peaks <= -1.5 dB),
+26 clips in `clips/*.mp3` (about 220 KB; update_start / update_failed added 2026-10-27 and played by
+firmware installs from 0.4.3: mono 32 kbps / 22 kHz, -16 LUFS target, peaks <= -1.5 dB),
 lines in `clips/lines.tsv`, chosen takes in `clips/choices.json`. Voice: Kevin's ElevenLabs
 "Computer Voice" sample (`clips_work/reference.mp3`, reading the test script word for word),
 cloned with local Qwen3-TTS 0.6B-Base (same "steady" settings as the station's calm lines).

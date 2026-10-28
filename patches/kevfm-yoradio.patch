@@ -1355,8 +1355,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
    webserver.onFileUpload(handleUpload);
 diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.cpp yoRadio/src/plugins/KevFM/kevfm.cpp
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.cpp	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm.cpp	2026-10-27 21:13:45.184899400 -0400
-@@ -0,0 +1,514 @@
++++ yoRadio/src/plugins/KevFM/kevfm.cpp	2026-10-27 21:39:06.675067700 -0400
+@@ -0,0 +1,527 @@
 +/*
 + * KevFM gift radio plugin for yoRadio. See kevfm.h and README.md.
 + */
@@ -1463,11 +1463,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +  }
 +  /* The knob's step defaults to 4 of 254 (about 1.6 % a click; yoRadio's 1 needed a dozen turns
 +     from silent to full). Once per radio, and again after Factory settings (which clears this). */
-+  if (p.begin("kevfm", false)) {
-+    if (!p.getBool("volstep", false)) {
-+      p.putBool("volstep", true);
-+      _setDefaultStep = true;                       /* config isn't loaded yet: done in on_connect / loop */
-+    }
++  if (p.begin("kevfm", true)) {
++    _setDefaultStep = !p.getBool("volstep2", false); /* config isn't loaded yet: done in loop() */
 +    p.end();
 +  }
 +  ledcAttach(KEVFM_PIN_LED, KEVFM_LED_FREQ, KEVFM_LED_BITS);
@@ -1547,6 +1544,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +  if (_setDefaultStep) {
 +    _setDefaultStep = false;
 +    config.saveValue(&config.store.volsteps, (uint8_t)KEVFM_DEFAULT_VOLSTEP);
++    Preferences p;                                  /* marked done only after the step is saved */
++    if (p.begin("kevfm", false)) { p.putBool("volstep2", true); p.end(); }
 +    Serial.printf("##[KevFM]#\tknob step set to %u\n", KEVFM_DEFAULT_VOLSTEP);
 +  }
 +  _clipLoop();
@@ -1740,6 +1739,20 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +  return true;
 +}
 +
++/* For firmware updates (main loop): play /clips/<name>.mp3 to its end and return; the stream
++   stays stopped afterwards (the update stops it anyway, or restarts it itself). */
++void KevFM::speakNow(const char *name) {
++  Serial.printf("##[KevFM]#\tsay: %s\n", name);
++  if (!_playClip(name)) return;
++  _clipResume = false;
++  uint32_t start = millis();
++  while (_clipPlaying && millis() - start < KEVFM_CLIP_MAX_MS + 500) {
++    player.loop();                                  /* runs the audio (Audio::loop) */
++    _clipLoop();
++    delay(1);
++  }
++}
++
 +void KevFM::_clipLoop() {
 +  if (!_clipPlaying) return;
 +  /* yoRadio only runs the audio loop while connected; in setup-hotspot mode run it here */
@@ -1873,8 +1886,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +}
 diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.h yoRadio/src/plugins/KevFM/kevfm.h
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.h	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm.h	2026-10-27 21:12:48.850739800 -0400
-@@ -0,0 +1,125 @@
++++ yoRadio/src/plugins/KevFM/kevfm.h	2026-10-27 21:35:19.495257100 -0400
+@@ -0,0 +1,126 @@
 +/*
 + * KevFM gift radio plugin for yoRadio.
 + *
@@ -1921,7 +1934,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +  /*  Called from the main loop (ctrls_on_loop) and from the controls.cpp patch  */
 +  void loop();
 +  bool btnEvent(int id, uint8_t kind);
-+  bool clipBusy() const { return _clipPlaying; }   /* also answers the KevFM patch in audiohandlers.h */
++  bool clipBusy() const { return _clipPlaying; }
++  void speakNow(const char *name);     /* play a clip to the end, then leave the stream stopped (updates) */   /* also answers the KevFM patch in audiohandlers.h */
 +  void onTurn();
 +
 +  /*  Web page (kevfm_web.cpp). Requests arrive on the web server's task, so they only leave
@@ -2002,8 +2016,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +#endif
 diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.cpp yoRadio/src/plugins/KevFM/kevfm_ota.cpp
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_ota.cpp	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm_ota.cpp	2026-10-25 22:22:54.225402300 -0400
-@@ -0,0 +1,416 @@
++++ yoRadio/src/plugins/KevFM/kevfm_ota.cpp	2026-10-27 21:35:19.497269200 -0400
+@@ -0,0 +1,419 @@
 +/*
 + * KevFM radio firmware updates, the same way as the Bubs stock ticker: nothing happens
 + * unless someone presses a button on the radio's Firmware page.
@@ -2277,6 +2291,7 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +  if (WiFi.status() != WL_CONNECTED) { setMsg(OTA_FAILED, "The radio is not connected to the Internet."); return; }
 +  otaProgress = 0;
 +  setMsg(OTA_INSTALLING, "Stopping the music for the update...");
++  kevfm.speakNow("update_start");                   /* "Updating the radio. Please don't unplug me." */
 +  stopStream();
 +  Serial.printf("##[KevFM]#\tupdate install: largest free block %u bytes, storage %u of %u bytes used\n",
 +                ESP.getMaxAllocHeap(), (unsigned)SPIFFS.usedBytes(), (unsigned)SPIFFS.totalBytes());
@@ -2288,6 +2303,7 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +    String tmp = "/www/" + webFiles[i] + ".new";
 +    if (!download(String(KEVFM_UPDATE_BASE) + KEVFM_UPDATE_WEBDIR + webFiles[i], webFiles[i].c_str(), 0, false, tmp.c_str())) {
 +      for (uint8_t j = 0; j <= i; j++) SPIFFS.remove("/www/" + webFiles[j] + ".new");
++      kevfm.speakNow("update_failed");              /* "The update didn't work. I'll keep playing." */
 +      player.sendCommand({PR_PLAY, 1});
 +      return;
 +    }
@@ -2295,6 +2311,7 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +  setMsg(OTA_INSTALLING, "Downloading firmware %s...", ver);
 +  if (!download(String(KEVFM_UPDATE_BASE) + file, "firmware", size, true, nullptr)) {
 +    for (uint8_t j = 0; j < webCount; j++) SPIFFS.remove("/www/" + webFiles[j] + ".new");
++    kevfm.speakNow("update_failed");
 +    player.sendCommand({PR_PLAY, 1});
 +    return;
 +  }
@@ -2633,14 +2650,14 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +#endif
 diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_version.h yoRadio/src/plugins/KevFM/kevfm_version.h
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_version.h	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm_version.h	2026-10-27 21:12:55.314716100 -0400
++++ yoRadio/src/plugins/KevFM/kevfm_version.h	2026-10-27 21:35:25.632828800 -0400
 @@ -0,0 +1,17 @@
 +#ifndef KEVFM_VERSION_H
 +#define KEVFM_VERSION_H
 +
 +/*  KevFM radio firmware version. Bump it for every release published to GitHub: the radio
 +    offers an update when update.json's "version" is higher than this.  */
-+#define KEVFM_VERSION        "0.4.2"
++#define KEVFM_VERSION        "0.4.3"
 +
 +/*  Where "Check for update" looks: the public GitHub repo, read as plain raw files
 +    (the same simple pattern as the Bubs stock ticker). update.json, the .bin and the

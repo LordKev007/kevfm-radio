@@ -104,11 +104,8 @@ void KevFM::on_setup() {
   }
   /* The knob's step defaults to 4 of 254 (about 1.6 % a click; yoRadio's 1 needed a dozen turns
      from silent to full). Once per radio, and again after Factory settings (which clears this). */
-  if (p.begin("kevfm", false)) {
-    if (!p.getBool("volstep", false)) {
-      p.putBool("volstep", true);
-      _setDefaultStep = true;                       /* config isn't loaded yet: done in on_connect / loop */
-    }
+  if (p.begin("kevfm", true)) {
+    _setDefaultStep = !p.getBool("volstep2", false); /* config isn't loaded yet: done in loop() */
     p.end();
   }
   ledcAttach(KEVFM_PIN_LED, KEVFM_LED_FREQ, KEVFM_LED_BITS);
@@ -188,6 +185,8 @@ void KevFM::loop() {
   if (_setDefaultStep) {
     _setDefaultStep = false;
     config.saveValue(&config.store.volsteps, (uint8_t)KEVFM_DEFAULT_VOLSTEP);
+    Preferences p;                                  /* marked done only after the step is saved */
+    if (p.begin("kevfm", false)) { p.putBool("volstep2", true); p.end(); }
     Serial.printf("##[KevFM]#\tknob step set to %u\n", KEVFM_DEFAULT_VOLSTEP);
   }
   _clipLoop();
@@ -379,6 +378,20 @@ bool KevFM::_playClip(const char *name, bool sleepAfter) {
   _clipSleepAfter = sleepAfter;
   _clipStartMs = millis();
   return true;
+}
+
+/* For firmware updates (main loop): play /clips/<name>.mp3 to its end and return; the stream
+   stays stopped afterwards (the update stops it anyway, or restarts it itself). */
+void KevFM::speakNow(const char *name) {
+  Serial.printf("##[KevFM]#\tsay: %s\n", name);
+  if (!_playClip(name)) return;
+  _clipResume = false;
+  uint32_t start = millis();
+  while (_clipPlaying && millis() - start < KEVFM_CLIP_MAX_MS + 500) {
+    player.loop();                                  /* runs the audio (Audio::loop) */
+    _clipLoop();
+    delay(1);
+  }
 }
 
 void KevFM::_clipLoop() {
