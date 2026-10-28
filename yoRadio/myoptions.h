@@ -17,8 +17,11 @@
 
 /*  KY-040 encoder. The module has its own pull-ups on CLK/DT; its GND is D22 (software ground).
     The push switch (D14) has no pull-up on the module, so the internal pull-up stays on. */
-#define ENC_BTNL          32             /* CLK */
-#define ENC_BTNR          33             /* DT  */
+/*  Wired CLK -> D32, DT -> D33. yoRadio's "left/right" pins are given the other way round
+    (L = 33, R = 32) so turning the knob clockwise turns the volume UP (with L = 32 it was
+    backwards on the first assembled radio, 2026-10-27). */
+#define ENC_BTNL          33             /* DT  */
+#define ENC_BTNR          32             /* CLK */
 #define ENC_BTNB          14             /* knob press -> light mode (KevFM plugin) */
 #define ENC_INTERNALPULLUP true
 

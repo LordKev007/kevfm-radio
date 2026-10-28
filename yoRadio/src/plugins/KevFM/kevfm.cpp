@@ -27,6 +27,7 @@ static const uint32_t KEVFM_LONGPRESS_MS  = 800;   /* sleep button: hold this lo
 static const uint32_t KEVFM_DEBOUNCE_MS   = 30;
 static const uint32_t KEVFM_TIMER_FADE_MS = 6000;  /* sleep timer reached zero: music fades down  */
 static const uint32_t KEVFM_POWER_FADE_MS = 800;   /* power button held: quick fade               */
+static const uint32_t KEVFM_POWER_IGNORE_MS = 4000; /* power button ignored this long after start-up */
 static const uint32_t KEVFM_TOUCH_GLOW_MS = 10000; /* "glow when touched": stays lit this long    */
 static const uint32_t KEVFM_FADE_IN_MS    = 300;
 static const uint32_t KEVFM_FADE_OUT_MS   = 1500;
@@ -206,8 +207,14 @@ bool KevFM::btnEvent(int id, uint8_t kind) {
         if (kind == KEVFM_BTN_DOUBLE) _cycleLight();
       }
       return true;
-    case EVT_BTNMODE:                               /* power button */
-      if (kind == KEVFM_BTN_LONG_START) {
+    case EVT_BTNMODE:                               /* power button: a tap (or a hold) switches off */
+      /* The tap that woke the radio may still be "down" while it starts up: ignore the
+         power button for the first few seconds, or it would go straight back to sleep. */
+      if (millis() < KEVFM_POWER_IGNORE_MS) return true;
+      if (kind == KEVFM_BTN_CLICK || kind == KEVFM_BTN_DOUBLE) {
+        Serial.println("##[KevFM]#\tpower button tapped: going to sleep");
+        _startFadeToSleep(KEVFM_POWER_FADE_MS, false);   /* _fadeLoop sleeps once faded */
+      } else if (kind == KEVFM_BTN_LONG_START) {
         _powerHeld = true;
         Serial.println("##[KevFM]#\tpower button: going to sleep");
         _startFadeToSleep(KEVFM_POWER_FADE_MS, false);

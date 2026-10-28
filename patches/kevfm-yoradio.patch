@@ -12,8 +12,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +#toggleplaylist, #prevbutton, #nextbutton, #playlist, #pleditorwrap { display: none !important; }
 diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/yoRadio/myoptions.h yoRadio/myoptions.h
 --- upstream_yoradio/yoRadio/myoptions.h	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/myoptions.h	2026-10-25 18:38:58.105616900 -0400
-@@ -0,0 +1,53 @@
++++ yoRadio/myoptions.h	2026-10-27 21:04:53.651753100 -0400
+@@ -0,0 +1,56 @@
 +#ifndef myoptions_h
 +#define myoptions_h
 +
@@ -33,8 +33,11 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +
 +/*  KY-040 encoder. The module has its own pull-ups on CLK/DT; its GND is D22 (software ground).
 +    The push switch (D14) has no pull-up on the module, so the internal pull-up stays on. */
-+#define ENC_BTNL          32             /* CLK */
-+#define ENC_BTNR          33             /* DT  */
++/*  Wired CLK -> D32, DT -> D33. yoRadio's "left/right" pins are given the other way round
++    (L = 33, R = 32) so turning the knob clockwise turns the volume UP (with L = 32 it was
++    backwards on the first assembled radio, 2026-10-27). */
++#define ENC_BTNL          33             /* DT  */
++#define ENC_BTNR          32             /* CLK */
 +#define ENC_BTNB          14             /* knob press -> light mode (KevFM plugin) */
 +#define ENC_INTERNALPULLUP true
 +
@@ -167,8 +170,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
    webserver.onFileUpload(handleUpload);
 diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.cpp yoRadio/src/plugins/KevFM/kevfm.cpp
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.cpp	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm.cpp	2026-10-26 21:31:22.535668500 -0400
-@@ -0,0 +1,492 @@
++++ yoRadio/src/plugins/KevFM/kevfm.cpp	2026-10-27 21:07:31.566120600 -0400
+@@ -0,0 +1,499 @@
 +/*
 + * KevFM gift radio plugin for yoRadio. See kevfm.h and README.md.
 + */
@@ -198,6 +201,7 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +static const uint32_t KEVFM_DEBOUNCE_MS   = 30;
 +static const uint32_t KEVFM_TIMER_FADE_MS = 6000;  /* sleep timer reached zero: music fades down  */
 +static const uint32_t KEVFM_POWER_FADE_MS = 800;   /* power button held: quick fade               */
++static const uint32_t KEVFM_POWER_IGNORE_MS = 4000; /* power button ignored this long after start-up */
 +static const uint32_t KEVFM_TOUCH_GLOW_MS = 10000; /* "glow when touched": stays lit this long    */
 +static const uint32_t KEVFM_FADE_IN_MS    = 300;
 +static const uint32_t KEVFM_FADE_OUT_MS   = 1500;
@@ -377,8 +381,14 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +        if (kind == KEVFM_BTN_DOUBLE) _cycleLight();
 +      }
 +      return true;
-+    case EVT_BTNMODE:                               /* power button */
-+      if (kind == KEVFM_BTN_LONG_START) {
++    case EVT_BTNMODE:                               /* power button: a tap (or a hold) switches off */
++      /* The tap that woke the radio may still be "down" while it starts up: ignore the
++         power button for the first few seconds, or it would go straight back to sleep. */
++      if (millis() < KEVFM_POWER_IGNORE_MS) return true;
++      if (kind == KEVFM_BTN_CLICK || kind == KEVFM_BTN_DOUBLE) {
++        Serial.println("##[KevFM]#\tpower button tapped: going to sleep");
++        _startFadeToSleep(KEVFM_POWER_FADE_MS, false);   /* _fadeLoop sleeps once faded */
++      } else if (kind == KEVFM_BTN_LONG_START) {
 +        _powerHeld = true;
 +        Serial.println("##[KevFM]#\tpower button: going to sleep");
 +        _startFadeToSleep(KEVFM_POWER_FADE_MS, false);
@@ -1422,14 +1432,14 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +#endif
 diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_version.h yoRadio/src/plugins/KevFM/kevfm_version.h
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_version.h	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm_version.h	2026-10-26 20:58:52.682023100 -0400
++++ yoRadio/src/plugins/KevFM/kevfm_version.h	2026-10-27 21:04:54.110343700 -0400
 @@ -0,0 +1,17 @@
 +#ifndef KEVFM_VERSION_H
 +#define KEVFM_VERSION_H
 +
 +/*  KevFM radio firmware version. Bump it for every release published to GitHub: the radio
 +    offers an update when update.json's "version" is higher than this.  */
-+#define KEVFM_VERSION        "0.4.0"
++#define KEVFM_VERSION        "0.4.1"
 +
 +/*  Where "Check for update" looks: the public GitHub repo, read as plain raw files
 +    (the same simple pattern as the Bubs stock ticker). update.json, the .bin and the

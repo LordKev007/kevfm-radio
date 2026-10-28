@@ -51,7 +51,10 @@ Behaviour spec: `E:\KevinFM\dev\gusi_radio_handwired\firmware_spec.md`.
   announced. Hold (0.8 s): time left. At zero: music fades over 6 s, amp SD LOW, deep sleep.
   Turning the knob or pressing the sleep button during that fade keeps the radio on.
   (yoRadio's `sleepForAfter` is not used: its uint8 seconds overflow and it wakes on a timer.)
-- **Power button**: hold ~0.5 s = quick fade, amp off, deep sleep (after release). Press = wake.
+- **Power button** (0.4.1): a tap = quick fade, amp off, deep sleep (Kevin: "Dad will never think
+  about holding it"); holding works too. A tap wakes it. Ignored for 4 s after start-up so the
+  waking tap can't switch it straight back off.
+- **Knob direction** (0.4.1): yoRadio's encoder pins are given as L = D33, R = D32 so clockwise = louder.
 - **Status light**: breathes slowly while the sleep timer runs (modes "touched" and "always on").
 - **Announcements**: the spoken clips are a later phase. Until then the light answers:
   - sleep timer: 1 / 2 / 3 / 4 short blinks = 10 / 15 / 30 / 60 min, one long blink = off
