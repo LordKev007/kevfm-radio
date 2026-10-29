@@ -6,7 +6,7 @@ A take qualifies if Whisper heard the line (match >= 0.9 in clips_work/transcrip
 Of those, the one whose median pitch is closest to the reference voice wins (so every clip
 sounds like the same calm voice; pitch is what tracked "same voice" in the Dr. Fever work).
 Each winner is trimmed, padded 0.15 s, brought to -16 LUFS (peaks limited at -1.5 dB),
-and saved as mono 32 kbps / 22 kHz MP3 in clips/<name>.mp3 (small: they live in the radio's file storage). clips/index.html lists them with every
+and saved as mono 24 kbps / 22 kHz MP3 in clips/<name>.mp3 (small: they live in the radio's file storage). clips/index.html lists them with every
 take, so a different take can be chosen by ear (clips_work/choices.json overrides the pick).
 """
 import html
@@ -67,14 +67,16 @@ def finish(src, dst):
     # 1-3 s speech clips without breaking its true-peak limit, so it left them 3-6 dB quiet and uneven
     gain = LUFS - float(m["input_i"])
     norm = f"volume={gain:.2f}dB,alimiter=limit=0.84:attack=2:release=50:level=false"
-    r = ffmpeg("-i", str(src), "-af", f"{trim},{norm}", "-ac", "1", "-ar", "22050", "-c:a", "libmp3lame", "-b:a", "32k",
+    r = ffmpeg("-i", str(src), "-af", f"{trim},{norm}", "-ac", "1", "-ar", "22050", "-c:a", "libmp3lame", "-b:a", "24k",
                "-map_metadata", "-1", "-id3v2_version", "0", "-write_id3v1", "0", str(dst))   # no tags: yoRadio would show them as titles
     if r.returncode:
         raise RuntimeError(r.stderr[-500:])
 
 
 def main():
-    lines = [row.split("\t", 1) for row in (WORK / "lines.tsv").read_text(encoding="utf-8").splitlines() if row.strip()]
+    # carrier_* lines only exist to cut single words out of (tools/cut_carrier_words.py): not clips
+    lines = [row.split("\t", 1) for row in (WORK / "lines.tsv").read_text(encoding="utf-8").splitlines()
+             if row.strip() and not row.startswith("carrier_")]
     tpath = WORK / "transcripts.json"   # optional (tools/check_clips.py); without it, a length check stands in
     heard = json.loads(tpath.read_text(encoding="utf-8")) if tpath.exists() else None
     choices_path = WORK / "choices.json"

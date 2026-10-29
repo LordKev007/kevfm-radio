@@ -55,6 +55,16 @@ Behaviour spec: `E:\KevinFM\dev\gusi_radio_handwired\firmware_spec.md`.
   about holding it"); holding works too. A tap wakes it. Ignored for 4 s after start-up so the
   waking tap can't switch it straight back off.
 - **Knob direction** (0.4.1): yoRadio's encoder pins are given as L = D33, R = D32 so clockwise = louder.
+- **Say the address** (0.4.4): hold **power + sleep together** ~1.5 s: the radio says its IP
+  address twice ("one nine two" dot "one six eight" dot 5 dot 1 1 9 for 192.168.x.x addresses;
+  otherwise digit by digit), then the music comes back. Not on Wi-Fi: "I need Wi-Fi". For finding
+  a radio at someone else's house for an update (http://<address>/firmware). Neither button's own
+  action happens. Digits, "dot", "one nine two" and "one six eight" are cut from one ElevenLabs
+  recording of the Computer Voice (`clips/digits_source_elevenlabs.mp3`) at its pauses: Qwen
+  0.6B could not render single words (silence, garble, run-ons), and cutting words out of Qwen
+  phrases with Whisper timings left "-ber" of "Number" on every digit.
+- **Storage** (0.4.4): the cover picture moved into the firmware and clips are 24 kbps (was 32)
+  to fit 39 clips; storage 73% used after Wi-Fi is saved (the startup settings line prints it).
 - **Knob step** (0.4.2): each click = "volume step" (Settings page, default 4 of 254, set once per
   radio and after Factory settings); turning fast multiplies it (yoRadio's speed-up, 200). yoRadio
   ignored the step for the knob on screenless radios and wrapped its count at 254 (a volume jump
@@ -242,7 +252,7 @@ page light_on 1.5 s, light_off 1.2 s, sleep_60 2.0 s, sleep_off 1.6 s, each foll
 stream reconnecting by itself. Not yet tried: hearing them (amp), time-left (sleep button),
 goodnight before sleep (timer running out), station_off (stream down ~45 s).
 
-26 clips in `clips/*.mp3` (about 220 KB; update_start / update_failed added 2026-10-27 and played by
+39 clips in `clips/*.mp3` (about 200 KB at 24 kbps; update_start / update_failed added 2026-10-27 and played by
 firmware installs from 0.4.3: mono 32 kbps / 22 kHz, -16 LUFS target, peaks <= -1.5 dB),
 lines in `clips/lines.tsv`, chosen takes in `clips/choices.json`. Voice: Kevin's ElevenLabs
 "Computer Voice" sample (`clips_work/reference.mp3`, reading the test script word for word),

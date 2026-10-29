@@ -22,6 +22,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--takes", type=int, default=3)
     ap.add_argument("--only", nargs="*", help="render just these names")
+    ap.add_argument("--xvec", action="store_true", help="voice fingerprint only (no continuation): better for single words; takes named <name>_x<n>")
     args = ap.parse_args()
 
     import numpy as np
@@ -37,7 +38,8 @@ def main():
                 lines.append((name.strip(), text.strip()))
     out = WORK / "takes"
     out.mkdir(parents=True, exist_ok=True)
-    todo = [(n, t, k) for n, t in lines for k in range(1, args.takes + 1) if not (out / f"{n}_{k}.wav").exists()]
+    tag = "x" if args.xvec else ""
+    todo = [(n, t, k) for n, t in lines for k in range(1, args.takes + 1) if not (out / f"{n}_{tag}{k}.wav").exists()]
     print(f"{len(lines)} lines, {len(todo)} takes to render", flush=True)
     if not todo:
         return
@@ -47,7 +49,7 @@ def main():
     prompt = model.create_voice_clone_prompt(
         ref_audio=str(WORK / "reference.wav"),
         ref_text=(WORK / "reference.txt").read_text(encoding="utf-8").strip(),
-        x_vector_only_mode=False,
+        x_vector_only_mode=args.xvec,
     )
     print(f"model ready in {time.perf_counter() - started:.1f} s", flush=True)
 
@@ -62,8 +64,8 @@ def main():
             subtalker_temperature=STEADY["temperature"],
         )
         audio = np.asarray(wavs[0], dtype=np.float32).squeeze()
-        sf.write(out / f"{name}_{take}.wav", audio, rate)
-        print(f"[{i}/{len(todo)}] {name}_{take}: {len(audio) / rate:.2f} s audio in {time.perf_counter() - t0:.1f} s", flush=True)
+        sf.write(out / f"{name}_{tag}{take}.wav", audio, rate)
+        print(f"[{i}/{len(todo)}] {name}_{tag}{take}: {len(audio) / rate:.2f} s audio in {time.perf_counter() - t0:.1f} s", flush=True)
 
 
 if __name__ == "__main__":

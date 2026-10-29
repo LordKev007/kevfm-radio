@@ -44,8 +44,8 @@ public:
   /*  Called from the main loop (ctrls_on_loop) and from the controls.cpp patch  */
   void loop();
   bool btnEvent(int id, uint8_t kind);
-  bool clipBusy() const { return _clipPlaying; }
-  void speakNow(const char *name);     /* play a clip to the end, then leave the stream stopped (updates) */   /* also answers the KevFM patch in audiohandlers.h */
+  bool clipBusy() const { return _clipPlaying || _seqActive; }   /* also answers the KevFM patch in audiohandlers.h */
+  void speakNow(const char *name);     /* play a clip to the end, then leave the stream stopped (updates) */
   void onTurn();
 
   /*  Web page (kevfm_web.cpp). Requests arrive on the web server's task, so they only leave
@@ -96,6 +96,15 @@ private:
   uint32_t _lastWifiSayMs = 0;
   uint16_t _apSecs = 0;
   bool     _setDefaultStep = false;     /* first boot of 0.4.2+: knob step to 4 */
+  /* spoken sequence (IP address): clip names played one after another, "pause" = 1.2 s gap */
+  static const uint8_t SEQ_MAX = 40;
+  char     _seq[SEQ_MAX][12];
+  uint8_t  _seqLen = 0, _seqPos = 0;
+  bool     _seqActive = false, _seqResume = false;
+  uint32_t _seqPauseUntil = 0;
+  /* power + sleep held together: say the IP address */
+  uint32_t _comboSince = 0, _comboEndMs = 0;
+  bool     _comboDone = false;
 
   void _touch();
   void _sleepBtnLoop();
@@ -105,6 +114,9 @@ private:
   void _ledLoop();
   void _say(kevfmClip_e clip, uint16_t minutes = 0);
   bool _playClip(const char *name, bool sleepAfter = false);
+  void _speakIp();
+  void _seqLoop();
+  void _comboLoop();
   void _clipLoop();
   void _cycleLight();
   void _startFadeToSleep(uint32_t fadeMs, bool cancelable);

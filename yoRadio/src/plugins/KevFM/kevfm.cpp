@@ -190,8 +190,10 @@ void KevFM::loop() {
     Serial.printf("##[KevFM]#\tknob step set to %u\n", KEVFM_DEFAULT_VOLSTEP);
   }
   _clipLoop();
+  _seqLoop();
   _webLoop();
   _sleepBtnLoop();
+  _comboLoop();
   _timerLoop();
   _fadeLoop();
   _ledLoop();
@@ -225,6 +227,8 @@ bool KevFM::btnEvent(int id, uint8_t kind) {
       /* The tap that woke the radio may still be "down" while it starts up: ignore the
          power button for the first few seconds, or it would go straight back to sleep. */
       if (millis() < KEVFM_POWER_IGNORE_MS) return true;
+      /* power + sleep together = "say the IP address" (_comboLoop): not a power press */
+      if (_comboSince || digitalRead(KEVFM_PIN_SLEEPBTN) == LOW || millis() - _comboEndMs < 1500) return true;
       if (kind == KEVFM_BTN_CLICK || kind == KEVFM_BTN_DOUBLE) {
         Serial.println("##[KevFM]#\tpower button tapped: going to sleep");
         _startFadeToSleep(KEVFM_POWER_FADE_MS, false);   /* _fadeLoop sleeps once faded */
@@ -250,7 +254,8 @@ void KevFM::_sleepBtnLoop() {
   if (raw && !_sbDown) {                            /* pressed */
     _sbDown = true; _sbLongDone = false; _sbDownMs = now;
     _touch();
-  } else if (raw && _sbDown && !_sbLongDone && now - _sbDownMs >= KEVFM_LONGPRESS_MS) {
+  } else if (raw && _sbDown && !_sbLongDone && now - _sbDownMs >= KEVFM_LONGPRESS_MS &&
+             digitalRead(KEVFM_PIN_POWER) == HIGH) {   /* power + sleep is the IP combination */
     _sbLongDone = true;
     _sleepBtnLong();
   } else if (!raw && _sbDown) {                     /* released */
@@ -378,6 +383,75 @@ bool KevFM::_playClip(const char *name, bool sleepAfter) {
   _clipSleepAfter = sleepAfter;
   _clipStartMs = millis();
   return true;
+}
+
+/* ---------------------------------------------------------------- IP address, spoken
+   Hold the power and sleep buttons together for 1.5 s: the radio says its address digit by
+   digit ("one nine two dot one six eight dot ..."), twice, so it can be found for an update
+   (http://<address>/firmware). Not on Wi-Fi: "I need Wi-Fi". */
+void KevFM::_comboLoop() {
+  uint32_t now = millis();
+  bool sleepDown = digitalRead(KEVFM_PIN_SLEEPBTN) == LOW, powerDown = digitalRead(KEVFM_PIN_POWER) == LOW;
+  if (sleepDown && powerDown) {
+    if (!_comboSince) {
+      _comboSince = now;
+      if (_fading && _powerHeld) {                  /* power pressed first started a fade: undo it */
+        _powerHeld = false;
+        _cancelFade();
+      }
+    }
+    _sbLongDone = true;                             /* the sleep button's own press doesn't count */
+    _coalesceUntil = 0;
+    if (!_comboDone && now - _comboSince >= 1500) { _comboDone = true; _touch(); _speakIp(); }
+  } else if (!sleepDown && !powerDown && _comboSince) {
+    _comboSince = 0;
+    _comboDone = false;
+    _comboEndMs = now;
+  }
+}
+
+void KevFM::_speakIp() {
+  if (network.status != CONNECTED) { _say(CLIP_WIFI_SETUP); return; }
+  String ip = WiFi.localIP().toString();
+  Serial.printf("##[KevFM]#\tsaying the address %s\n", ip.c_str());
+  _seqLen = 0;
+  for (uint8_t round = 0; round < 2; round++) {
+    size_t from = 0;
+    if (ip.startsWith("192.168.") && SPIFFS.exists("/clips/n192.mp3") && SPIFFS.exists("/clips/n168.mp3")) {
+      /* most home networks: "one nine two" dot "one six eight" dot, as phrases */
+      strlcpy(_seq[_seqLen++], "n192", sizeof(_seq[0]));
+      strlcpy(_seq[_seqLen++], "dot", sizeof(_seq[0]));
+      strlcpy(_seq[_seqLen++], "n168", sizeof(_seq[0]));
+      strlcpy(_seq[_seqLen++], "dot", sizeof(_seq[0]));
+      from = 8;
+    }
+    for (size_t i = from; i < ip.length() && _seqLen < SEQ_MAX - 1; i++) {
+      char c = ip[i];
+      if (c >= '0' && c <= '9') snprintf(_seq[_seqLen++], sizeof(_seq[0]), "digit_%c", c);
+      else if (c == '.') strlcpy(_seq[_seqLen++], "dot", sizeof(_seq[0]));
+    }
+    if (round == 0 && _seqLen < SEQ_MAX) strlcpy(_seq[_seqLen++], "pause", sizeof(_seq[0]));
+  }
+  _seqResume = player.status() == PLAYING || (_clipPlaying && _clipResume);
+  if (_clipPlaying) { player.stopSong(); _clipPlaying = false; _clipResume = false; _clipSleepAfter = false; }
+  if (player.status() == PLAYING) { player.sendCommand({PR_STOP, 0}); player.loop(); }
+  _seqPos = 0;
+  _seqPauseUntil = 0;
+  _seqActive = true;
+}
+
+void KevFM::_seqLoop() {
+  if (!_seqActive || _clipPlaying) return;
+  uint32_t now = millis();
+  if (_seqPauseUntil) { if (!reached(now, _seqPauseUntil)) return; _seqPauseUntil = 0; }
+  if (_seqPos >= _seqLen) {                         /* done: music back on if it was on */
+    _seqActive = false;
+    if (_seqResume) player.sendCommand({PR_PLAY, 1});
+    return;
+  }
+  const char *t = _seq[_seqPos++];
+  if (!strcmp(t, "pause")) { _seqPauseUntil = now + 1200; return; }
+  if (_playClip(t)) _clipResume = false;            /* the sequence restarts the stream at the end */
 }
 
 /* For firmware updates (main loop): play /clips/<name>.mp3 to its end and return; the stream

@@ -24,3 +24,16 @@ wifi_setup	I need Wi-Fi. Ask Kevin to set me up.
 station_off	KevFM is taking a break. I'll keep trying.
 update_start	Updating the radio. Please don't unplug me.
 update_failed	The update didn't work. I'll keep playing.
+digit_0	Zero.
+digit_1	One.
+digit_2	Two.
+digit_3	Three.
+digit_4	Four.
+digit_5	Five.
+digit_6	Six.
+digit_7	Seven.
+digit_8	Eight.
+digit_9	Nine.
+dot	Dot.
+n192	One nine two.
+n168	One six eight.

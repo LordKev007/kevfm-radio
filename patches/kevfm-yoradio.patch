@@ -1,4 +1,3 @@
-Binary files upstream_yoradio/yoRadio/data/www/kevfm-cover-256.jpg and yoRadio/data/www/kevfm-cover-256.jpg differ
 diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/yoRadio/data/www/theme.css yoRadio/data/www/theme.css
 --- upstream_yoradio/yoRadio/data/www/theme.css	2026-10-25 10:45:04.207844200 -0400
 +++ yoRadio/data/www/theme.css	2026-10-25 10:53:01.719046200 -0400
@@ -1355,8 +1354,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
    webserver.onFileUpload(handleUpload);
 diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.cpp yoRadio/src/plugins/KevFM/kevfm.cpp
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.cpp	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm.cpp	2026-10-27 21:39:06.675067700 -0400
-@@ -0,0 +1,527 @@
++++ yoRadio/src/plugins/KevFM/kevfm.cpp	2026-10-29 17:10:12.097462100 -0400
+@@ -0,0 +1,601 @@
 +/*
 + * KevFM gift radio plugin for yoRadio. See kevfm.h and README.md.
 + */
@@ -1549,8 +1548,10 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +    Serial.printf("##[KevFM]#\tknob step set to %u\n", KEVFM_DEFAULT_VOLSTEP);
 +  }
 +  _clipLoop();
++  _seqLoop();
 +  _webLoop();
 +  _sleepBtnLoop();
++  _comboLoop();
 +  _timerLoop();
 +  _fadeLoop();
 +  _ledLoop();
@@ -1584,6 +1585,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +      /* The tap that woke the radio may still be "down" while it starts up: ignore the
 +         power button for the first few seconds, or it would go straight back to sleep. */
 +      if (millis() < KEVFM_POWER_IGNORE_MS) return true;
++      /* power + sleep together = "say the IP address" (_comboLoop): not a power press */
++      if (_comboSince || digitalRead(KEVFM_PIN_SLEEPBTN) == LOW || millis() - _comboEndMs < 1500) return true;
 +      if (kind == KEVFM_BTN_CLICK || kind == KEVFM_BTN_DOUBLE) {
 +        Serial.println("##[KevFM]#\tpower button tapped: going to sleep");
 +        _startFadeToSleep(KEVFM_POWER_FADE_MS, false);   /* _fadeLoop sleeps once faded */
@@ -1609,7 +1612,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +  if (raw && !_sbDown) {                            /* pressed */
 +    _sbDown = true; _sbLongDone = false; _sbDownMs = now;
 +    _touch();
-+  } else if (raw && _sbDown && !_sbLongDone && now - _sbDownMs >= KEVFM_LONGPRESS_MS) {
++  } else if (raw && _sbDown && !_sbLongDone && now - _sbDownMs >= KEVFM_LONGPRESS_MS &&
++             digitalRead(KEVFM_PIN_POWER) == HIGH) {   /* power + sleep is the IP combination */
 +    _sbLongDone = true;
 +    _sleepBtnLong();
 +  } else if (!raw && _sbDown) {                     /* released */
@@ -1737,6 +1741,75 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +  _clipSleepAfter = sleepAfter;
 +  _clipStartMs = millis();
 +  return true;
++}
++
++/* ---------------------------------------------------------------- IP address, spoken
++   Hold the power and sleep buttons together for 1.5 s: the radio says its address digit by
++   digit ("one nine two dot one six eight dot ..."), twice, so it can be found for an update
++   (http://<address>/firmware). Not on Wi-Fi: "I need Wi-Fi". */
++void KevFM::_comboLoop() {
++  uint32_t now = millis();
++  bool sleepDown = digitalRead(KEVFM_PIN_SLEEPBTN) == LOW, powerDown = digitalRead(KEVFM_PIN_POWER) == LOW;
++  if (sleepDown && powerDown) {
++    if (!_comboSince) {
++      _comboSince = now;
++      if (_fading && _powerHeld) {                  /* power pressed first started a fade: undo it */
++        _powerHeld = false;
++        _cancelFade();
++      }
++    }
++    _sbLongDone = true;                             /* the sleep button's own press doesn't count */
++    _coalesceUntil = 0;
++    if (!_comboDone && now - _comboSince >= 1500) { _comboDone = true; _touch(); _speakIp(); }
++  } else if (!sleepDown && !powerDown && _comboSince) {
++    _comboSince = 0;
++    _comboDone = false;
++    _comboEndMs = now;
++  }
++}
++
++void KevFM::_speakIp() {
++  if (network.status != CONNECTED) { _say(CLIP_WIFI_SETUP); return; }
++  String ip = WiFi.localIP().toString();
++  Serial.printf("##[KevFM]#\tsaying the address %s\n", ip.c_str());
++  _seqLen = 0;
++  for (uint8_t round = 0; round < 2; round++) {
++    size_t from = 0;
++    if (ip.startsWith("192.168.") && SPIFFS.exists("/clips/n192.mp3") && SPIFFS.exists("/clips/n168.mp3")) {
++      /* most home networks: "one nine two" dot "one six eight" dot, as phrases */
++      strlcpy(_seq[_seqLen++], "n192", sizeof(_seq[0]));
++      strlcpy(_seq[_seqLen++], "dot", sizeof(_seq[0]));
++      strlcpy(_seq[_seqLen++], "n168", sizeof(_seq[0]));
++      strlcpy(_seq[_seqLen++], "dot", sizeof(_seq[0]));
++      from = 8;
++    }
++    for (size_t i = from; i < ip.length() && _seqLen < SEQ_MAX - 1; i++) {
++      char c = ip[i];
++      if (c >= '0' && c <= '9') snprintf(_seq[_seqLen++], sizeof(_seq[0]), "digit_%c", c);
++      else if (c == '.') strlcpy(_seq[_seqLen++], "dot", sizeof(_seq[0]));
++    }
++    if (round == 0 && _seqLen < SEQ_MAX) strlcpy(_seq[_seqLen++], "pause", sizeof(_seq[0]));
++  }
++  _seqResume = player.status() == PLAYING || (_clipPlaying && _clipResume);
++  if (_clipPlaying) { player.stopSong(); _clipPlaying = false; _clipResume = false; _clipSleepAfter = false; }
++  if (player.status() == PLAYING) { player.sendCommand({PR_STOP, 0}); player.loop(); }
++  _seqPos = 0;
++  _seqPauseUntil = 0;
++  _seqActive = true;
++}
++
++void KevFM::_seqLoop() {
++  if (!_seqActive || _clipPlaying) return;
++  uint32_t now = millis();
++  if (_seqPauseUntil) { if (!reached(now, _seqPauseUntil)) return; _seqPauseUntil = 0; }
++  if (_seqPos >= _seqLen) {                         /* done: music back on if it was on */
++    _seqActive = false;
++    if (_seqResume) player.sendCommand({PR_PLAY, 1});
++    return;
++  }
++  const char *t = _seq[_seqPos++];
++  if (!strcmp(t, "pause")) { _seqPauseUntil = now + 1200; return; }
++  if (_playClip(t)) _clipResume = false;            /* the sequence restarts the stream at the end */
 +}
 +
 +/* For firmware updates (main loop): play /clips/<name>.mp3 to its end and return; the stream
@@ -1886,8 +1959,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +}
 diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.h yoRadio/src/plugins/KevFM/kevfm.h
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm.h	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm.h	2026-10-27 21:35:19.495257100 -0400
-@@ -0,0 +1,126 @@
++++ yoRadio/src/plugins/KevFM/kevfm.h	2026-10-29 09:46:01.991710600 -0400
+@@ -0,0 +1,138 @@
 +/*
 + * KevFM gift radio plugin for yoRadio.
 + *
@@ -1934,8 +2007,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +  /*  Called from the main loop (ctrls_on_loop) and from the controls.cpp patch  */
 +  void loop();
 +  bool btnEvent(int id, uint8_t kind);
-+  bool clipBusy() const { return _clipPlaying; }
-+  void speakNow(const char *name);     /* play a clip to the end, then leave the stream stopped (updates) */   /* also answers the KevFM patch in audiohandlers.h */
++  bool clipBusy() const { return _clipPlaying || _seqActive; }   /* also answers the KevFM patch in audiohandlers.h */
++  void speakNow(const char *name);     /* play a clip to the end, then leave the stream stopped (updates) */
 +  void onTurn();
 +
 +  /*  Web page (kevfm_web.cpp). Requests arrive on the web server's task, so they only leave
@@ -1986,6 +2059,15 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +  uint32_t _lastWifiSayMs = 0;
 +  uint16_t _apSecs = 0;
 +  bool     _setDefaultStep = false;     /* first boot of 0.4.2+: knob step to 4 */
++  /* spoken sequence (IP address): clip names played one after another, "pause" = 1.2 s gap */
++  static const uint8_t SEQ_MAX = 40;
++  char     _seq[SEQ_MAX][12];
++  uint8_t  _seqLen = 0, _seqPos = 0;
++  bool     _seqActive = false, _seqResume = false;
++  uint32_t _seqPauseUntil = 0;
++  /* power + sleep held together: say the IP address */
++  uint32_t _comboSince = 0, _comboEndMs = 0;
++  bool     _comboDone = false;
 +
 +  void _touch();
 +  void _sleepBtnLoop();
@@ -1995,6 +2077,9 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +  void _ledLoop();
 +  void _say(kevfmClip_e clip, uint16_t minutes = 0);
 +  bool _playClip(const char *name, bool sleepAfter = false);
++  void _speakIp();
++  void _seqLoop();
++  void _comboLoop();
 +  void _clipLoop();
 +  void _cycleLight();
 +  void _startFadeToSleep(uint32_t fadeMs, bool cancelable);
@@ -2454,8 +2539,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +#endif
 diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_settings.cpp yoRadio/src/plugins/KevFM/kevfm_settings.cpp
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_settings.cpp	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm_settings.cpp	2026-10-26 22:11:26.259242200 -0400
-@@ -0,0 +1,157 @@
++++ yoRadio/src/plugins/KevFM/kevfm_settings.cpp	2026-10-29 09:46:01.993704400 -0400
+@@ -0,0 +1,159 @@
 +/*
 + * KevFM radio Settings page endpoints: only the yoRadio settings that matter on a radio
 + * with no screen, no remote and one station (see README, "Web pages").
@@ -2477,6 +2562,7 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +#include <ESPmDNS.h>
 +#include <Preferences.h>
 +#include <EEPROM.h>
++#include <SPIFFS.h>
 +#include "esp_mac.h"
 +
 +static volatile uint32_t restartAt = 0;
@@ -2504,9 +2590,10 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +/* One line with every KevFM-relevant setting, for the USB log (at startup and after a change) */
 +static void printSettings(const char *why) {
 +  Serial.printf("##[KevFM]#\tsettings (%s): name %s.local, volume %u, volume step %u, knob speed-up %u, "
-+                "bass %+d, middle %+d, treble %+d, light mode %u\n",
++                "bass %+d, middle %+d, treble %+d, light mode %u, storage %u of %u bytes used\n",
 +                why, config.store.mdnsname, config.store.volume, config.store.volsteps, config.store.encacc,
-+                config.store.bass, config.store.middle, config.store.trebble, kevfm.lightMode());
++                config.store.bass, config.store.middle, config.store.trebble, kevfm.lightMode(),
++                (unsigned)SPIFFS.usedBytes(), (unsigned)SPIFFS.totalBytes());
 +}
 +
 +static String param(AsyncWebServerRequest *request, const char *name) {
@@ -2650,14 +2737,14 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +#endif
 diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_version.h yoRadio/src/plugins/KevFM/kevfm_version.h
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_version.h	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm_version.h	2026-10-27 21:35:25.632828800 -0400
++++ yoRadio/src/plugins/KevFM/kevfm_version.h	2026-10-29 10:06:02.237864500 -0400
 @@ -0,0 +1,17 @@
 +#ifndef KEVFM_VERSION_H
 +#define KEVFM_VERSION_H
 +
 +/*  KevFM radio firmware version. Bump it for every release published to GitHub: the radio
 +    offers an update when update.json's "version" is higher than this.  */
-+#define KEVFM_VERSION        "0.4.3"
++#define KEVFM_VERSION        "0.4.4"
 +
 +/*  Where "Check for update" looks: the public GitHub repo, read as plain raw files
 +    (the same simple pattern as the Bubs stock ticker). update.json, the .bin and the
@@ -2671,8 +2758,8 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +#endif
 diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_web.cpp yoRadio/src/plugins/KevFM/kevfm_web.cpp
 --- upstream_yoradio/yoRadio/src/plugins/KevFM/kevfm_web.cpp	1969-12-31 19:00:00.000000000 -0500
-+++ yoRadio/src/plugins/KevFM/kevfm_web.cpp	2026-10-26 21:31:22.536661300 -0400
-@@ -0,0 +1,331 @@
++++ yoRadio/src/plugins/KevFM/kevfm_web.cpp	2026-10-29 10:06:01.521998300 -0400
+@@ -0,0 +1,336 @@
 +/*
 + * KevFM radio web pages and endpoints (see README.md, "Web pages").
 + *
@@ -2749,7 +2836,7 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +
 +/* Copies of the pages that 0.2.0 kept in storage: no longer used, and storage is tight */
 +static void removeOldPageFiles() {
-+  static const char *const old[] = {"/www/kevfm.html", "/www/setup.html", "/www/firmware.html"};
++  static const char *const old[] = {"/www/kevfm.html", "/www/setup.html", "/www/firmware.html", "/www/kevfm-cover-256.jpg"};
 +  for (const char *path : old) {
 +    if (SPIFFS.exists(path) && SPIFFS.remove(path)) Serial.printf("##[KevFM]#\tremoved old %s from storage\n", path);
 +  }
@@ -2988,6 +3075,11 @@ diff -ruN -x build -x partitions.csv -x clips -x kevfm_pages.h upstream_yoradio/
 +  server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, PAGE_SETUP); });
 +  server.on("/firmware", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, PAGE_FIRMWARE); });
 +  server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, PAGE_SETTINGS); });
++  server.on("/kevfm-cover-256.jpg", HTTP_GET, [](AsyncWebServerRequest *r) {   /* cover: in the firmware, not storage */
++    AsyncWebServerResponse *res = r->beginResponse_P(200, "image/jpeg", kevfm_cover_jpg, kevfm_cover_jpg_len);
++    res->addHeader("Cache-Control", "max-age=86400");
++    r->send(res);
++  });
 +  kevfmOtaBegin(server);
 +  kevfmSettingsBegin(server);
 +  server.on("/kevfm/status", HTTP_GET, onStatus);

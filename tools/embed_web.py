@@ -38,6 +38,16 @@ def main():
         lines.append("};")
         lines.append(f"static const size_t {ident}_len = {len(data)};")
         lines.append("")
+    cover = WEB / "kevfm-cover-256.jpg"              # already compressed: stored as is
+    data = cover.read_bytes()
+    total += len(data)
+    lines.append(f"/* kevfm-cover-256.jpg: {len(data)} bytes (in the firmware since 0.4.4: the file storage was full) */")
+    lines.append("static const uint8_t kevfm_cover_jpg[] PROGMEM = {")
+    for i in range(0, len(data), 20):
+        lines.append("  " + ",".join(str(b) for b in data[i:i + 20]) + ",")
+    lines.append("};")
+    lines.append(f"static const size_t kevfm_cover_jpg_len = {len(data)};")
+    lines.append("")
     lines.append("#endif")
     text = "\n".join(lines) + "\n"
     if not OUT.exists() or OUT.read_text(encoding="utf-8") != text:

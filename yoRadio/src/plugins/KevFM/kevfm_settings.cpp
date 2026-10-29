@@ -19,6 +19,7 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <EEPROM.h>
+#include <SPIFFS.h>
 #include "esp_mac.h"
 
 static volatile uint32_t restartAt = 0;
@@ -46,9 +47,10 @@ void kevfmFixDefaultName() {
 /* One line with every KevFM-relevant setting, for the USB log (at startup and after a change) */
 static void printSettings(const char *why) {
   Serial.printf("##[KevFM]#\tsettings (%s): name %s.local, volume %u, volume step %u, knob speed-up %u, "
-                "bass %+d, middle %+d, treble %+d, light mode %u\n",
+                "bass %+d, middle %+d, treble %+d, light mode %u, storage %u of %u bytes used\n",
                 why, config.store.mdnsname, config.store.volume, config.store.volsteps, config.store.encacc,
-                config.store.bass, config.store.middle, config.store.trebble, kevfm.lightMode());
+                config.store.bass, config.store.middle, config.store.trebble, kevfm.lightMode(),
+                (unsigned)SPIFFS.usedBytes(), (unsigned)SPIFFS.totalBytes());
 }
 
 static String param(AsyncWebServerRequest *request, const char *name) {

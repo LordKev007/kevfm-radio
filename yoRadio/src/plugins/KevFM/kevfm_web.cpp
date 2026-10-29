@@ -74,7 +74,7 @@ static void sendPage(AsyncWebServerRequest *request, kevfmPage_e page) {
 
 /* Copies of the pages that 0.2.0 kept in storage: no longer used, and storage is tight */
 static void removeOldPageFiles() {
-  static const char *const old[] = {"/www/kevfm.html", "/www/setup.html", "/www/firmware.html"};
+  static const char *const old[] = {"/www/kevfm.html", "/www/setup.html", "/www/firmware.html", "/www/kevfm-cover-256.jpg"};
   for (const char *path : old) {
     if (SPIFFS.exists(path) && SPIFFS.remove(path)) Serial.printf("##[KevFM]#\tremoved old %s from storage\n", path);
   }
@@ -313,6 +313,11 @@ void kevfm_web_begin(AsyncWebServer &server) {
   server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, PAGE_SETUP); });
   server.on("/firmware", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, PAGE_FIRMWARE); });
   server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *r) { sendPage(r, PAGE_SETTINGS); });
+  server.on("/kevfm-cover-256.jpg", HTTP_GET, [](AsyncWebServerRequest *r) {   /* cover: in the firmware, not storage */
+    AsyncWebServerResponse *res = r->beginResponse_P(200, "image/jpeg", kevfm_cover_jpg, kevfm_cover_jpg_len);
+    res->addHeader("Cache-Control", "max-age=86400");
+    r->send(res);
+  });
   kevfmOtaBegin(server);
   kevfmSettingsBegin(server);
   server.on("/kevfm/status", HTTP_GET, onStatus);
